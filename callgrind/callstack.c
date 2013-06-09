@@ -27,6 +27,7 @@
 */
 
 #include "global.h"
+#include <string.h>
 
 /*------------------------------------------------------------*/
 /*--- Call stack, operations                               ---*/
@@ -40,6 +41,8 @@
  * Array call_stack_esp holds SPs of corresponding stack frames.
  *
  */
+
+static Bool dumped[1000 * 1000];
 
 #define N_CALL_STACK_INITIAL_ENTRIES 500
 
@@ -183,12 +186,26 @@ static void function_left(fn_node* fn)
  * If <skip> is true, this is a call to a function to be skipped;
  * for this, we set jcc = 0.
  */
+
+static HChar outbuf[4096];
 void CLG_(push_call_stack)(BBCC* from, UInt jmp, BBCC* to, Addr sp, Bool skip)
 {
+
     jCC* jcc;
     UInt* pdepth;
     call_entry* current_entry;
     Addr ret_addr;
+    fn_node *fn;
+
+    fn = to->cxt->fn[0];
+
+    if(!dumped[fn->number])
+    {
+      dumped[fn->number] = True;
+
+      if(!(fn->name[0] != '\0' && fn->name[1] != '\0' && fn->name[0] == '0' && fn->name[1] == 'x'))
+        VG_(printf)("INIT:%s\n", fn->name);
+    }
 
     /* Ensure a call stack of size <current_sp>+1.
      * The +1 is needed as push_cxt will store the
