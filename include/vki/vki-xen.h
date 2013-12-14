@@ -58,6 +58,7 @@ typedef vki_uint16_t vki_xen_domid_t;
 #endif
 
 DEFINE_VKI_XEN_GUEST_HANDLE(void);
+DEFINE_VKI_XEN_GUEST_HANDLE(char);
 DEFINE_VKI_XEN_GUEST_HANDLE(vki_xen_pfn_t);
 
 __DEFINE_VKI_XEN_GUEST_HANDLE(vki_ulong, unsigned long);
@@ -71,9 +72,9 @@ __DEFINE_VKI_XEN_GUEST_HANDLE(vki_uint16, vki_uint16_t);
 __DEFINE_VKI_XEN_GUEST_HANDLE(vki_uint32, vki_uint32_t);
 __DEFINE_VKI_XEN_GUEST_HANDLE(vki_uint64, vki_uint64_t);
 
-struct vki_xenctl_cpumap {
+struct vki_xenctl_bitmap {
     VKI_XEN_GUEST_HANDLE_64(vki_uint8) bitmap;
-    vki_uint32_t nr_cpus;
+    vki_uint32_t nr_bits;
 };
 
 #include <vki/vki-xen-domctl.h>
@@ -84,6 +85,7 @@ struct vki_xenctl_cpumap {
 #include <vki/vki-xen-gnttab.h>
 #include <vki/vki-xen-version.h>
 #include <vki/vki-xen-hvm.h>
+#include <vki/vki-xen-tmem.h>
 
 #endif // __VKI_XEN_H
 

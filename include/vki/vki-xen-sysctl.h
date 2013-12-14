@@ -7,6 +7,7 @@
  *
  * - 00000008: Xen 4.1
  * - 00000009: Xen 4.2
+ * - 0000000a: Xen 4.3
  *
  * When adding a new subop be sure to include the variants used by all
  * of the above, both here and in syswrap-xen.c
@@ -35,6 +36,28 @@
 #define VKI_XEN_SYSCTL_numainfo                      17
 #define VKI_XEN_SYSCTL_cpupool_op                    18
 #define VKI_XEN_SYSCTL_scheduler_op                  19
+#define VKI_XEN_SYSCTL_coverage_op                   20
+
+struct vki_xen_sysctl_readconsole {
+    /* IN */
+    vki_uint8_t clear;
+    vki_uint8_t incremental;
+
+    vki_uint8_t pad0, pad1;
+
+    /*
+     * IN:  Start index for consumption if @incremental.
+     * OUT: End index after consuming from the console.
+     */
+    vki_uint32_t index;
+    VKI_XEN_GUEST_HANDLE_64(char) buffer; /* IN */
+
+    /*
+     * IN:  size of buffer.
+     * OUT: bytes written into buffer.
+     */
+    vki_uint32_t count;
+};
 
 struct vki_xen_sysctl_getdomaininfolist_00000008 {
     /* IN variables. */
@@ -54,6 +77,15 @@ struct vki_xen_sysctl_getdomaininfolist_00000009 {
     vki_uint32_t              num_domains;
 };
 
+struct vki_xen_sysctl_getdomaininfolist_0000000a {
+    /* IN variables. */
+    vki_xen_domid_t           first_domain;
+    vki_uint32_t              max_domains;
+    VKI_XEN_GUEST_HANDLE_64(vki_xen_domctl_getdomaininfo_00000009_t) buffer;
+    /* OUT variables. */
+    vki_uint32_t              num_domains;
+};
+
 #define VKI_XEN_SYSCTL_CPUPOOL_OP_CREATE                1  /* C */
 #define VKI_XEN_SYSCTL_CPUPOOL_OP_DESTROY               2  /* D */
 #define VKI_XEN_SYSCTL_CPUPOOL_OP_INFO                  3  /* I */
@@ -69,7 +101,13 @@ struct vki_xen_sysctl_cpupool_op {
     vki_uint32_t domid;       /* IN: M              */
     vki_uint32_t cpu;         /* IN: AR             */
     vki_uint32_t n_dom;       /*            OUT: I  */
-    struct vki_xenctl_cpumap cpumap; /*     OUT: IF */
+    struct vki_xenctl_bitmap cpumap; /*     OUT: IF */
+};
+
+struct vki_xen_sysctl_debug_keys {
+    /* IN variables. */
+    VKI_XEN_GUEST_HANDLE_64(char) keys;
+    vki_uint32_t nr_keys;
 };
 
 struct vki_xen_sysctl_topologyinfo {
@@ -85,7 +123,7 @@ struct vki_xen_sysctl_numainfo {
     VKI_XEN_GUEST_HANDLE_64(vki_uint64) node_to_memfree;
     VKI_XEN_GUEST_HANDLE_64(vki_uint32) node_to_node_distance;
 };
-struct vki_xen_sysctl_physinfo {
+struct vki_xen_sysctl_physinfo_00000008 {
     vki_uint32_t threads_per_core;
     vki_uint32_t cores_per_socket;
     vki_uint32_t nr_cpus;     /* # CPUs currently online */
@@ -101,20 +139,44 @@ struct vki_xen_sysctl_physinfo {
     vki_uint32_t capabilities;
 };
 
+struct vki_xen_sysctl_physinfo_0000000a {
+    vki_uint32_t threads_per_core;
+    vki_uint32_t cores_per_socket;
+    vki_uint32_t nr_cpus;     /* # CPUs currently online */
+    vki_uint32_t max_cpu_id;  /* Largest possible CPU ID on this host */
+    vki_uint32_t nr_nodes;    /* # nodes currently online */
+    vki_uint32_t max_node_id; /* Largest possible node ID on this host */
+    vki_uint32_t cpu_khz;
+    vki_xen_uint64_aligned_t total_pages;
+    vki_xen_uint64_aligned_t free_pages;
+    vki_xen_uint64_aligned_t scrub_pages;
+    vki_xen_uint64_aligned_t outstanding_pages;
+    vki_uint32_t hw_cap[8];
+
+    vki_uint32_t capabilities;
+};
+
+struct vki_xen_sysctl_sched_id {
+    /* OUT variable. */
+    vki_uint32_t              sched_id;
+};
+
 struct vki_xen_sysctl {
     vki_uint32_t cmd;
     vki_uint32_t interface_version; /* XEN_SYSCTL_INTERFACE_VERSION */
     union {
-        //struct vki_xen_sysctl_readconsole       readconsole;
+        struct vki_xen_sysctl_readconsole       readconsole;
         //struct vki_xen_sysctl_tbuf_op           tbuf_op;
-        struct vki_xen_sysctl_physinfo          physinfo;
+        struct vki_xen_sysctl_physinfo_00000008 physinfo_00000008;
+        struct vki_xen_sysctl_physinfo_0000000a physinfo_0000000a;
         struct vki_xen_sysctl_topologyinfo      topologyinfo;
         struct vki_xen_sysctl_numainfo          numainfo;
-        //struct vki_xen_sysctl_sched_id          sched_id;
+        struct vki_xen_sysctl_sched_id          sched_id;
         //struct vki_xen_sysctl_perfc_op          perfc_op;
         struct vki_xen_sysctl_getdomaininfolist_00000008 getdomaininfolist_00000008;
         struct vki_xen_sysctl_getdomaininfolist_00000009 getdomaininfolist_00000009;
-        //struct vki_xen_sysctl_debug_keys        debug_keys;
+        struct vki_xen_sysctl_getdomaininfolist_0000000a getdomaininfolist_0000000a;
+        struct vki_xen_sysctl_debug_keys        debug_keys;
         //struct vki_xen_sysctl_getcpuinfo        getcpuinfo;
         //struct vki_xen_sysctl_availheap         availheap;
         //struct vki_xen_sysctl_get_pmstat        get_pmstat;
@@ -124,6 +186,8 @@ struct vki_xen_sysctl {
         //struct vki_xen_sysctl_lockprof_op       lockprof_op;
         struct vki_xen_sysctl_cpupool_op        cpupool_op;
         //struct vki_xen_sysctl_scheduler_op      scheduler_op;
+        //struct vki_xen_sysctl_coverage_op       coverage_op;
+
         vki_uint8_t                             pad[128];
     } u;
 };

@@ -8,7 +8,7 @@
    This file is part of Helgrind, a Valgrind tool for detecting errors
    in threaded programs.
 
-   Copyright (C) 2007-2012 OpenWorks LLP
+   Copyright (C) 2007-2013 OpenWorks LLP
       info@open-works.co.uk
 
    This program is free software; you can redistribute it and/or
@@ -54,7 +54,7 @@
 
 #include "pub_tool_basics.h"
 #include "pub_tool_redir.h"
-#include "valgrind.h"
+#include "pub_tool_clreq.h"
 #include "helgrind.h"
 #include "config.h"
 
@@ -154,13 +154,27 @@
 #include <errno.h>
 #include <pthread.h>
 
+/* A standalone memcmp. */
+__attribute__((noinline))
+static int my_memcmp ( const void* ptr1, const void* ptr2, size_t size)
+{
+   unsigned char* uchar_ptr1 = (unsigned char*) ptr1;
+   unsigned char* uchar_ptr2 = (unsigned char*) ptr2;
+   size_t i;
+   for (i = 0; i < size; ++i) {
+      if (uchar_ptr1[i] != uchar_ptr2[i])
+         return (uchar_ptr1[i] < uchar_ptr2[i]) ? -1 : 1;
+   }
+   return 0;
+}
 
 /* A lame version of strerror which doesn't use the real libc
    strerror_r, since using the latter just generates endless more
    threading errors (glibc goes off and does tons of crap w.r.t.
    locales etc) */
 static const HChar* lame_strerror ( long err )
-{   switch (err) {
+{
+   switch (err) {
       case EPERM:       return "EPERM: Operation not permitted";
       case ENOENT:      return "ENOENT: No such file or directory";
       case ESRCH:       return "ESRCH: No such process";
@@ -446,14 +460,23 @@ PTH_FUNC(int, pthreadZumutexZudestroy, // pthread_mutex_destroy
               pthread_mutex_t *mutex)
 {
    int    ret;
+   unsigned long mutex_is_init;
    OrigFn fn;
+
    VALGRIND_GET_ORIG_FN(fn);
    if (TRACE_PTH_FNS) {
       fprintf(stderr, "<< pthread_mxdestroy %p", mutex); fflush(stderr);
    }
 
-   DO_CREQ_v_W(_VG_USERREQ__HG_PTHREAD_MUTEX_DESTROY_PRE,
-               pthread_mutex_t*,mutex);
+   if (mutex != NULL) {
+      static const pthread_mutex_t mutex_init = PTHREAD_MUTEX_INITIALIZER;
+      mutex_is_init = my_memcmp(mutex, &mutex_init, sizeof(*mutex)) == 0;
+   } else {
+      mutex_is_init = 0;
+   }
+
+   DO_CREQ_v_WW(_VG_USERREQ__HG_PTHREAD_MUTEX_DESTROY_PRE,
+                pthread_mutex_t*, mutex, unsigned long, mutex_is_init);
 
    CALL_FN_W_W(ret, fn, mutex);
 
@@ -685,8 +708,8 @@ static int pthread_cond_wait_WRK(pthread_cond_t* cond,
    }
 
    if (ret == 0 && mutex_is_valid) {
-      DO_CREQ_v_WW(_VG_USERREQ__HG_PTHREAD_COND_WAIT_POST,
-                   pthread_cond_t*,cond, pthread_mutex_t*,mutex);
+      DO_CREQ_v_WWW(_VG_USERREQ__HG_PTHREAD_COND_WAIT_POST,
+                    pthread_cond_t*,cond, pthread_mutex_t*,mutex, long,0);
    }
 
    if (ret != 0) {
@@ -773,9 +796,10 @@ static int pthread_cond_timedwait_WRK(pthread_cond_t* cond,
                   pthread_mutex_t*,mutex);
    }
 
-   if (ret == 0 && mutex_is_valid) {
-      DO_CREQ_v_WW(_VG_USERREQ__HG_PTHREAD_COND_WAIT_POST,
-                   pthread_cond_t*,cond, pthread_mutex_t*,mutex);
+   if ((ret == 0 || ret == ETIMEDOUT) && mutex_is_valid) {
+      DO_CREQ_v_WWW(_VG_USERREQ__HG_PTHREAD_COND_WAIT_POST,
+                    pthread_cond_t*,cond, pthread_mutex_t*,mutex,
+                    long,ret == ETIMEDOUT);
    }
 
    if (ret != 0 && ret != ETIMEDOUT) {
@@ -975,6 +999,7 @@ __attribute__((noinline))
 static int pthread_cond_destroy_WRK(pthread_cond_t* cond)
 {
    int ret;
+   unsigned long cond_is_init;
    OrigFn fn;
 
    VALGRIND_GET_ORIG_FN(fn);
@@ -984,8 +1009,15 @@ static int pthread_cond_destroy_WRK(pthread_cond_t* cond)
       fflush(stderr);
    }
 
-   DO_CREQ_v_W(_VG_USERREQ__HG_PTHREAD_COND_DESTROY_PRE,
-               pthread_cond_t*,cond);
+   if (cond != NULL) {
+      const pthread_cond_t cond_init = PTHREAD_COND_INITIALIZER;
+      cond_is_init = my_memcmp(cond, &cond_init, sizeof(*cond)) == 0;
+   } else {
+     cond_is_init = 0;
+   }
+
+   DO_CREQ_v_WW(_VG_USERREQ__HG_PTHREAD_COND_DESTROY_PRE,
+                pthread_cond_t*, cond, unsigned long, cond_is_init);
 
    CALL_FN_W_W(ret, fn, cond);
 
@@ -2402,201 +2434,7 @@ QT5_FUNC(void*, _ZN6QMutexD2Ev, void* self)
 /*--- overrun the input arrays.                                ---*/
 /*----------------------------------------------------------------*/
 
-/* Copied verbatim from memcheck/mc_replace_strmem.c.  When copying
-   new functions, please keep them in the same order as they appear in
-   mc_replace_strmem.c. */
-
-
-#define STRCHR(soname, fnname) \
-   char* VG_REPLACE_FUNCTION_ZU(soname,fnname) ( const char* s, int c ); \
-   char* VG_REPLACE_FUNCTION_ZU(soname,fnname) ( const char* s, int c ) \
-   { \
-      HChar  ch = (HChar)c ; \
-      const HChar* p  = s;   \
-      while (True) { \
-         if (*p == ch) return (HChar *)p; \
-         if (*p == 0) return NULL; \
-         p++; \
-      } \
-   }
-
-// Apparently index() is the same thing as strchr()
-#if defined(VGO_linux)
- STRCHR(VG_Z_LIBC_SONAME,          strchr)
- STRCHR(VG_Z_LIBC_SONAME,          index)
- STRCHR(VG_Z_LD_LINUX_SO_2,        strchr)
- STRCHR(VG_Z_LD_LINUX_SO_2,        index)
- STRCHR(VG_Z_LD_LINUX_X86_64_SO_2, strchr)
- STRCHR(VG_Z_LD_LINUX_X86_64_SO_2, index)
-#elif defined(VGO_darwin)
- STRCHR(VG_Z_LIBC_SONAME,          strchr)
- STRCHR(VG_Z_LIBC_SONAME,          index)
-#endif
-
-
-// Note that this replacement often doesn't get used because gcc inlines
-// calls to strlen() with its own built-in version.  This can be very
-// confusing if you aren't expecting it.  Other small functions in this file
-// may also be inline by gcc.
-#define STRLEN(soname, fnname) \
-   SizeT VG_REPLACE_FUNCTION_ZU(soname,fnname)( const char* str ); \
-   SizeT VG_REPLACE_FUNCTION_ZU(soname,fnname)( const char* str ) \
-   { \
-      SizeT i = 0; \
-      while (str[i] != 0) i++; \
-      return i; \
-   }
-
-#if defined(VGO_linux)
- STRLEN(VG_Z_LIBC_SONAME,          strlen)
- STRLEN(VG_Z_LD_LINUX_SO_2,        strlen)
- STRLEN(VG_Z_LD_LINUX_X86_64_SO_2, strlen)
-#elif defined(VGO_darwin)
- STRLEN(VG_Z_LIBC_SONAME,          strlen)
-#endif
-
-
-#define STRCPY(soname, fnname) \
-   char* VG_REPLACE_FUNCTION_ZU(soname, fnname) ( char* dst, const char* src ); \
-   char* VG_REPLACE_FUNCTION_ZU(soname, fnname) ( char* dst, const char* src ) \
-   { \
-      HChar* dst_orig = dst; \
-      \
-      while (*src) *dst++ = *src++; \
-      *dst = 0; \
-      \
-      return dst_orig; \
-   }
-
-#if defined(VGO_linux)
- STRCPY(VG_Z_LIBC_SONAME, strcpy)
-#elif defined(VGO_darwin)
- STRCPY(VG_Z_LIBC_SONAME, strcpy)
-#endif
-
-
-#define STRCMP(soname, fnname) \
-   int VG_REPLACE_FUNCTION_ZU(soname,fnname) \
-          ( const char* s1, const char* s2 ); \
-   int VG_REPLACE_FUNCTION_ZU(soname,fnname) \
-          ( const char* s1, const char* s2 ) \
-   { \
-      register UChar c1; \
-      register UChar c2; \
-      while (True) { \
-         c1 = *(UChar *)s1; \
-         c2 = *(UChar *)s2; \
-         if (c1 != c2) break; \
-         if (c1 == 0) break; \
-         s1++; s2++; \
-      } \
-      if ((UChar)c1 < (UChar)c2) return -1; \
-      if ((UChar)c1 > (UChar)c2) return 1; \
-      return 0; \
-   }
-
-#if defined(VGO_linux)
- STRCMP(VG_Z_LIBC_SONAME,          strcmp)
- STRCMP(VG_Z_LD_LINUX_X86_64_SO_2, strcmp)
- STRCMP(VG_Z_LD64_SO_1,            strcmp)
-#elif defined(VGO_darwin)
- STRCMP(VG_Z_LIBC_SONAME,          strcmp)
-#endif
-
-
-#define MEMCPY(soname, fnname) \
-   void* VG_REPLACE_FUNCTION_ZU(soname,fnname) \
-            ( void *dst, const void *src, SizeT len ); \
-   void* VG_REPLACE_FUNCTION_ZU(soname,fnname) \
-            ( void *dst, const void *src, SizeT len ) \
-   { \
-      const Addr WS = sizeof(UWord); /* 8 or 4 */ \
-      const Addr WM = WS - 1;        /* 7 or 3 */ \
-      \
-      if (len > 0) { \
-         if (dst < src) { \
-         \
-            /* Copying backwards. */ \
-            SizeT n = len; \
-            Addr  d = (Addr)dst; \
-            Addr  s = (Addr)src; \
-            \
-            if (((s^d) & WM) == 0) { \
-               /* s and d have same UWord alignment. */ \
-               /* Pull up to a UWord boundary. */ \
-               while ((s & WM) != 0 && n >= 1) \
-                  { *(UChar*)d = *(UChar*)s; s += 1; d += 1; n -= 1; } \
-               /* Copy UWords. */ \
-               while (n >= WS) \
-                  { *(UWord*)d = *(UWord*)s; s += WS; d += WS; n -= WS; } \
-               if (n == 0) \
-                  return dst; \
-            } \
-            if (((s|d) & 1) == 0) { \
-               /* Both are 16-aligned; copy what we can thusly. */ \
-               while (n >= 2) \
-                  { *(UShort*)d = *(UShort*)s; s += 2; d += 2; n -= 2; } \
-            } \
-            /* Copy leftovers, or everything if misaligned. */ \
-            while (n >= 1) \
-               { *(UChar*)d = *(UChar*)s; s += 1; d += 1; n -= 1; } \
-         \
-         } else if (dst > src) { \
-         \
-            SizeT n = len; \
-            Addr  d = ((Addr)dst) + n; \
-            Addr  s = ((Addr)src) + n; \
-            \
-            /* Copying forwards. */ \
-            if (((s^d) & WM) == 0) { \
-               /* s and d have same UWord alignment. */ \
-               /* Back down to a UWord boundary. */ \
-               while ((s & WM) != 0 && n >= 1) \
-                  { s -= 1; d -= 1; *(UChar*)d = *(UChar*)s; n -= 1; } \
-               /* Copy UWords. */ \
-               while (n >= WS) \
-                  { s -= WS; d -= WS; *(UWord*)d = *(UWord*)s; n -= WS; } \
-               if (n == 0) \
-                  return dst; \
-            } \
-            if (((s|d) & 1) == 0) { \
-               /* Both are 16-aligned; copy what we can thusly. */ \
-               while (n >= 2) \
-                  { s -= 2; d -= 2; *(UShort*)d = *(UShort*)s; n -= 2; } \
-            } \
-            /* Copy leftovers, or everything if misaligned. */ \
-            while (n >= 1) \
-               { s -= 1; d -= 1; *(UChar*)d = *(UChar*)s; n -= 1; } \
-            \
-         } \
-      } \
-      \
-      return dst; \
-   }
-
-#if defined(VGO_linux)
- MEMCPY(VG_Z_LIBC_SONAME,    memcpy)
- MEMCPY(VG_Z_LD_SO_1,        memcpy) /* ld.so.1 */
- MEMCPY(VG_Z_LD64_SO_1,      memcpy) /* ld64.so.1 */
- /* icc9 blats these around all over the place.  Not only in the main
-    executable but various .so's.  They are highly tuned and read
-    memory beyond the source boundary (although work correctly and
-    never go across page boundaries), so give errors when run
-    natively, at least for misaligned source arg.  Just intercepting
-    in the exe only until we understand more about the problem.  See
-    http://bugs.kde.org/show_bug.cgi?id=139776
- */
- MEMCPY(NONE, _intel_fast_memcpy)
-
-#elif defined(VGO_darwin)
-# if DARWIN_VERS <= DARWIN_10_6
-  MEMCPY(VG_Z_LIBC_SONAME,  memcpy)
-# endif
- MEMCPY(VG_Z_LIBC_SONAME,  memcpyZDVARIANTZDsse3x) /* memcpy$VARIANT$sse3x */
- MEMCPY(VG_Z_LIBC_SONAME,  memcpyZDVARIANTZDsse42) /* memcpy$VARIANT$sse42 */
-
-#endif
-
+#include "../shared/vg_replace_strmem.c"
 
 /*--------------------------------------------------------------------*/
 /*--- end                                          hg_intercepts.c ---*/

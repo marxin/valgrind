@@ -36,7 +36,8 @@ if VGCONF_PLATFORMS_INCLUDE_AMD64_LINUX
 SUBDIRS += amd64-linux
 endif
 
-DIST_SUBDIRS = x86 amd64 ppc32 ppc64 s390x linux darwin x86-linux amd64-linux .
+DIST_SUBDIRS = x86 amd64 ppc32 ppc64 s390x linux \
+		darwin x86-linux amd64-linux common .
 
 dist_noinst_SCRIPTS = \
 	filter_addressable \
@@ -45,8 +46,7 @@ dist_noinst_SCRIPTS = \
 	filter_stderr filter_xml \
 	filter_strchr \
 	filter_varinfo3 \
-	filter_memcheck \
-	filter_memcpy
+	filter_memcheck
 
 noinst_HEADERS = leak.h
 
@@ -73,6 +73,8 @@ EXTRA_DIST = \
 		buflen_check.stderr.exp-kfail \
 	bug287260.stderr.exp bug287260.vgtest \
 	calloc-overflow.stderr.exp calloc-overflow.vgtest\
+	client-msg.stderr.exp client-msg.vgtest \
+	client-msg-as-xml.stderr.exp client-msg-as-xml.vgtest \
 	clientperm.stderr.exp \
 	clientperm.stdout.exp clientperm.vgtest \
 	clireq_nofill.stderr.exp \
@@ -85,6 +87,7 @@ EXTRA_DIST = \
 	cond_st.vgtest cond_st.stdout.exp cond_st.stderr.exp-arm \
 		cond_st.stderr.exp-64bit-non-arm \
 		cond_st.stderr.exp-32bit-non-arm \
+	leak_cpp_interior.stderr.exp leak_cpp_interior.stderr.exp-64bit leak_cpp_interior.vgtest \
 	custom_alloc.stderr.exp custom_alloc.vgtest \
 		custom_alloc.stderr.exp-s390x-mvc \
 	custom-overlap.stderr.exp custom-overlap.vgtest \
@@ -170,6 +173,7 @@ EXTRA_DIST = \
 	origin5-bz2.vgtest origin5-bz2.stdout.exp \
 	origin5-bz2.stderr.exp-glibc25-x86 \
 	origin5-bz2.stderr.exp-glibc25-amd64 \
+	origin5-bz2.stderr.exp-glibc25-amd64-b \
 	origin5-bz2.stderr.exp-glibc27-ppc64 \
 	origin5-bz2.stderr.exp-glibc212-s390x \
 	origin5-bz2.stderr.exp-glibc234-s390x \
@@ -193,6 +197,7 @@ EXTRA_DIST = \
 	pointer-trace.vgtest \
 	pointer-trace.stderr.exp \
 	post-syscall.stderr.exp post-syscall.vgtest \
+	reach_thread_register.stderr.exp reach_thread_register.vgtest \
 	realloc1.stderr.exp realloc1.vgtest \
 	realloc2.stderr.exp realloc2.vgtest \
 	realloc3.stderr.exp realloc3.vgtest \
@@ -210,8 +215,7 @@ EXTRA_DIST = \
 	sigprocmask.stderr.exp sigprocmask.stderr.exp2 sigprocmask.vgtest \
 	static_malloc.stderr.exp static_malloc.vgtest \
 	stpncpy.vgtest stpncpy.stderr.exp stpncpy.stdout.exp \
-	strchr.stderr.exp strchr.stderr.exp2 strchr.stderr.exp-darwin \
-	    strchr.stderr.exp3 strchr.vgtest \
+	strchr.stderr.exp strchr.stderr.exp2 strchr.stderr.exp3 strchr.vgtest \
 	str_tester.stderr.exp str_tester.vgtest \
 	supp-dir.vgtest supp-dir.stderr.exp \
 	supp_unknown.stderr.exp supp_unknown.vgtest supp_unknown.supp \
@@ -225,6 +229,7 @@ EXTRA_DIST = \
 	test-plo-yes.vgtest test-plo-yes.stdout.exp \
 	    test-plo-yes.stderr.exp-le64 test-plo-yes.stderr.exp-le32 \
 	    test-plo-no.stderr.exp-s390x-mvc \
+	thread_alloca.stderr.exp thread_alloca.vgtest \
 	trivialleak.stderr.exp trivialleak.vgtest trivialleak.stderr.exp2 \
 	undef_malloc_args.stderr.exp undef_malloc_args.vgtest \
 	unit_libcbase.stderr.exp unit_libcbase.vgtest \
@@ -256,7 +261,9 @@ EXTRA_DIST = \
 	wrap8.vgtest wrap8.stdout.exp wrap8.stderr.exp \
 	wrap8.stdout.exp2 wrap8.stderr.exp2 \
 	writev1.stderr.exp writev1.vgtest \
-	xml1.stderr.exp xml1.stdout.exp xml1.vgtest xml1.stderr.exp-s390x-mvc
+	xml1.stderr.exp xml1.stdout.exp xml1.vgtest xml1.stderr.exp-s390x-mvc \
+	threadname.vgtest threadname.stderr.exp \
+	threadname_xml.vgtest threadname_xml.stderr.exp
 
 check_PROGRAMS = \
 	accounting \
@@ -271,14 +278,15 @@ check_PROGRAMS = \
 	buflen_check \
 	bug287260 \
 	calloc-overflow \
+	client-msg \
 	clientperm \
 	clireq_nofill \
 	clo_redzone \
 	cond_ld_st \
+	leak_cpp_interior \
 	custom_alloc \
 	custom-overlap \
 	deep-backtrace \
-	deep_templates \
 	describe-block \
 	doublefree error_counts errs1 exitprog execve1 execve2 erringfds \
 	err_disable1 err_disable2 err_disable3 err_disable4 \
@@ -321,6 +329,7 @@ check_PROGRAMS = \
 	supp_unknown supp1 supp2 suppfree \
 	test-plo \
 	trivialleak \
+	thread_alloca \
 	undef_malloc_args \
 	unit_libcbase unit_oset \
 	varinfo1 varinfo2 varinfo3 varinfo4 \
@@ -339,6 +348,18 @@ if HAVE_GNU_STPNCPY
 check_PROGRAMS += stpncpy
 endif
 
+if HAVE_PTHREAD_SETNAME_NP
+check_PROGRAMS += threadname 
+endif
+
+if HAVE_PTHREAD_BARRIER
+check_PROGRAMS += reach_thread_register
+endif
+
+if HAVE_GSTABS
+check_PROGRAMS += deep_templates
+endif
+
 AM_CFLAGS   += $(AM_FLAG_M3264_PRI)
 AM_CXXFLAGS += $(AM_FLAG_M3264_PRI)
 
@@ -353,6 +374,8 @@ else
 atomic_incs_CFLAGS = $(AM_CFLAGS)
 endif
 
+leak_cpp_interior_SOURCES	= leak_cpp_interior.cpp
+
 deep_templates_SOURCES	= deep_templates.cpp
 deep_templates_CXXFLAGS	= $(AM_CFLAGS) -O -gstabs
 
@@ -360,12 +383,18 @@ dw4_CFLAGS		= $(AM_CFLAGS) -gdwarf-4 -fdebug-types-section
 
 err_disable3_LDADD 	= -lpthread
 err_disable4_LDADD 	= -lpthread
+reach_thread_register_CFLAGS	= $(AM_CFLAGS) -O2
+reach_thread_register_LDADD     = -lpthread
+thread_alloca_LDADD     = -lpthread
+threadname_LDADD 	= -lpthread
 
 error_counts_CFLAGS = $(AM_CFLAGS) @FLAG_W_NO_UNINITIALIZED@
 
 execve1_CFLAGS = $(AM_CFLAGS) @FLAG_W_NO_NONNULL@
 
 execve2_CFLAGS = $(AM_CFLAGS) @FLAG_W_NO_NONNULL@
+
+fprw_CFLAGS = $(AM_CFLAGS) @FLAG_W_NO_UNINITIALIZED@
 
 inits_CFLAGS = $(AM_CFLAGS) @FLAG_W_NO_UNINITIALIZED@
 
@@ -379,6 +408,8 @@ mismatches_SOURCES	= mismatches.cpp
 
 new_nothrow_SOURCES 	= new_nothrow.cpp
 new_override_SOURCES 	= new_override.cpp
+
+origin1_yes_CFLAGS      = $(AM_CFLAGS) @FLAG_W_NO_UNINITIALIZED@
 
 origin2_not_quite_CFLAGS = $(AM_CFLAGS) @FLAG_W_NO_UNINITIALIZED@
 
@@ -397,9 +428,16 @@ overlap_CFLAGS		= $(AM_CFLAGS) -fno-builtin-memcpy -fno-builtin-strcpy
 
 str_tester_CFLAGS	= $(AM_CFLAGS) -Wno-shadow
 
+supp_CFLAGS             = $(AM_CFLAGS) @FLAG_W_NO_UNINITIALIZED@
+
 supp_unknown_SOURCES	= badjump.c
+supp_unknown_CFLAGS     = $(AM_CFLAGS) @FLAG_W_NO_UNINITIALIZED@
+
 supp1_SOURCES		= supp.c
+supp1_CFLAGS            = $(AM_CFLAGS) @FLAG_W_NO_UNINITIALIZED@
+
 supp2_SOURCES		= supp.c
+supp2_CFLAGS            = $(AM_CFLAGS) @FLAG_W_NO_UNINITIALIZED@
 
 vcpu_bz2_CFLAGS		= $(AM_CFLAGS) -O2
 vcpu_fbench_CFLAGS	= $(AM_CFLAGS) -O2
