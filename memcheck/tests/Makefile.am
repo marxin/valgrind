@@ -42,6 +42,7 @@ DIST_SUBDIRS = x86 amd64 ppc32 ppc64 s390x linux \
 dist_noinst_SCRIPTS = \
 	filter_addressable \
 	filter_allocs \
+	filter_dw4 \
 	filter_leak_cases_possible \
 	filter_stderr filter_xml \
 	filter_strchr \
@@ -198,6 +199,8 @@ EXTRA_DIST = \
 	pointer-trace.stderr.exp \
 	post-syscall.stderr.exp post-syscall.vgtest \
 	reach_thread_register.stderr.exp reach_thread_register.vgtest \
+		reach_thread_register.stderr.exp-mips32 \
+		reach_thread_register.stderr.exp-mips64 \
 	realloc1.stderr.exp realloc1.vgtest \
 	realloc2.stderr.exp realloc2.vgtest \
 	realloc3.stderr.exp realloc3.vgtest \

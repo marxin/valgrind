@@ -97,6 +97,11 @@ void VG_(get_UnwindStartRegs) ( /*OUT*/UnwindStartRegs* regs,
       = VG_(threads)[tid].arch.vex.guest_R11;
    regs->misc.ARM.r7
       = VG_(threads)[tid].arch.vex.guest_R7;
+#  elif defined(VGA_arm64)
+   regs->r_pc = VG_(threads)[tid].arch.vex.guest_PC;
+   regs->r_sp = VG_(threads)[tid].arch.vex.guest_XSP;
+   regs->misc.ARM64.x29 = VG_(threads)[tid].arch.vex.guest_X29;
+   regs->misc.ARM64.x30 = VG_(threads)[tid].arch.vex.guest_X30;
 #  elif defined(VGA_s390x)
    regs->r_pc = (ULong)VG_(threads)[tid].arch.vex.guest_IA;
    regs->r_sp = (ULong)VG_(threads)[tid].arch.vex.guest_SP;
@@ -124,38 +129,6 @@ void VG_(get_UnwindStartRegs) ( /*OUT*/UnwindStartRegs* regs,
       = VG_(threads)[tid].arch.vex.guest_r28;
 #  else
 #    error "Unknown arch"
-#  endif
-}
-
-
-void VG_(set_syscall_return_shadows) ( ThreadId tid,
-                                       /* shadow vals for the result */
-                                       UWord s1res, UWord s2res,
-                                       /* shadow vals for the error val */
-                                       UWord s1err, UWord s2err )
-{
-#  if defined(VGP_x86_linux)
-   VG_(threads)[tid].arch.vex_shadow1.guest_EAX = s1res;
-   VG_(threads)[tid].arch.vex_shadow2.guest_EAX = s2res;
-#  elif defined(VGP_amd64_linux)
-   VG_(threads)[tid].arch.vex_shadow1.guest_RAX = s1res;
-   VG_(threads)[tid].arch.vex_shadow2.guest_RAX = s2res;
-#  elif defined(VGP_ppc32_linux) || defined(VGP_ppc64_linux)
-   VG_(threads)[tid].arch.vex_shadow1.guest_GPR3 = s1res;
-   VG_(threads)[tid].arch.vex_shadow2.guest_GPR3 = s2res;
-#  elif defined(VGP_arm_linux)
-   VG_(threads)[tid].arch.vex_shadow1.guest_R0 = s1res;
-   VG_(threads)[tid].arch.vex_shadow2.guest_R0 = s2res;
-#  elif defined(VGO_darwin)
-   // GrP fixme darwin syscalls may return more values (2 registers plus error)
-#  elif defined(VGP_s390x_linux)
-   VG_(threads)[tid].arch.vex_shadow1.guest_r2 = s1res;
-   VG_(threads)[tid].arch.vex_shadow2.guest_r2 = s2res;
-#  elif defined(VGP_mips32_linux) || defined(VGP_mips64_linux)
-   VG_(threads)[tid].arch.vex_shadow1.guest_r2 = s1res;
-   VG_(threads)[tid].arch.vex_shadow2.guest_r2 = s2res;
-#  else
-#    error "Unknown plat"
 #  endif
 }
 
@@ -339,6 +312,38 @@ static void apply_to_GPs_of_tid(ThreadId tid, void (*f)(ThreadId,
    (*f)(tid, "r29", vex->guest_r29);
    (*f)(tid, "r30", vex->guest_r30);
    (*f)(tid, "r31", vex->guest_r31);
+#elif defined(VGA_arm64)
+   (*f)(tid, "x0" , vex->guest_X0 );
+   (*f)(tid, "x1" , vex->guest_X1 );
+   (*f)(tid, "x2" , vex->guest_X2 );
+   (*f)(tid, "x3" , vex->guest_X3 );
+   (*f)(tid, "x4" , vex->guest_X4 );
+   (*f)(tid, "x5" , vex->guest_X5 );
+   (*f)(tid, "x6" , vex->guest_X6 );
+   (*f)(tid, "x7" , vex->guest_X7 );
+   (*f)(tid, "x8" , vex->guest_X8 );
+   (*f)(tid, "x9" , vex->guest_X9 );
+   (*f)(tid, "x10", vex->guest_X10);
+   (*f)(tid, "x11", vex->guest_X11);
+   (*f)(tid, "x12", vex->guest_X12);
+   (*f)(tid, "x13", vex->guest_X13);
+   (*f)(tid, "x14", vex->guest_X14);
+   (*f)(tid, "x15", vex->guest_X15);
+   (*f)(tid, "x16", vex->guest_X16);
+   (*f)(tid, "x17", vex->guest_X17);
+   (*f)(tid, "x18", vex->guest_X18);
+   (*f)(tid, "x19", vex->guest_X19);
+   (*f)(tid, "x20", vex->guest_X20);
+   (*f)(tid, "x21", vex->guest_X21);
+   (*f)(tid, "x22", vex->guest_X22);
+   (*f)(tid, "x23", vex->guest_X23);
+   (*f)(tid, "x24", vex->guest_X24);
+   (*f)(tid, "x25", vex->guest_X25);
+   (*f)(tid, "x26", vex->guest_X26);
+   (*f)(tid, "x27", vex->guest_X27);
+   (*f)(tid, "x28", vex->guest_X28);
+   (*f)(tid, "x29", vex->guest_X29);
+   (*f)(tid, "x30", vex->guest_X30);
 #else
 #  error Unknown arch
 #endif
@@ -1193,7 +1198,7 @@ Bool VG_(machine_get_hwcaps)( void )
 
 #elif defined(VGA_s390x)
 
-#include "libvex_s390x_common.h"
+#  include "libvex_s390x_common.h"
 
    {
      /* Instruction set detection code borrowed from ppc above. */
@@ -1440,8 +1445,22 @@ Bool VG_(machine_get_hwcaps)( void )
      return True;
    }
 
+#elif defined(VGA_arm64)
+   {
+     va = VexArchARM64;
+
+     /* So far there are no variants. */
+     vai.hwcaps = 0;
+
+     VG_(machine_get_cache_info)(&vai);
+
+     return True;
+   }
+
 #elif defined(VGA_mips32)
    {
+     /* Define the position of F64 bit in FIR register. */
+#    define FP64 22
      va = VexArchMIPS32;
      UInt model = VG_(get_machine_model)();
      if (model == -1)
@@ -1502,6 +1521,16 @@ Bool VG_(machine_get_hwcaps)( void )
               vai.hwcaps |= VEX_PRID_IMP_34K;
            }
         }
+     }
+
+     /* Check if CPU has FPU and 32 dbl. prec. FP registers */
+     int FIR = 0;
+     __asm__ __volatile__(
+        "cfc1 %0, $0"  "\n\t"
+        : "=r" (FIR)
+     );
+     if (FIR & (1 << FP64)) {
+        vai.hwcaps |= VEX_PRID_CPU_32FPR;
      }
 
      VG_(convert_sigaction_fromK_to_toK)(&saved_sigill_act, &tmp_sigill_act);
@@ -1649,6 +1678,10 @@ Int VG_(machine_get_size_of_largest_guest_register) ( void )
       assume we always do. */
    return 16;
 
+#  elif defined(VGA_arm64)
+   /* ARM64 always has Neon, AFAICS. */
+   return 16;
+
 #  elif defined(VGA_mips32)
    /* The guest state implies 4, but that can't really be true, can
       it? */
@@ -1671,7 +1704,7 @@ void* VG_(fnptr_to_fnentry)( void* f )
       || defined(VGP_arm_linux)                           \
       || defined(VGP_ppc32_linux) || defined(VGO_darwin)  \
       || defined(VGP_s390x_linux) || defined(VGP_mips32_linux) \
-      || defined(VGP_mips64_linux)
+      || defined(VGP_mips64_linux) || defined(VGP_arm64_linux)
    return f;
 #  elif defined(VGP_ppc64_linux)
    /* ppc64-linux uses the AIX scheme, in which f is a pointer to a

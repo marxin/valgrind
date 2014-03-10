@@ -4,12 +4,23 @@ Release 3.10.0 (?? ?????? 201?)
 
 * ================== PLATFORM CHANGES =================
 
+* Support for Android on MIPS32.
+* Support for 64bit FPU on MIPS32 platforms.
 
 * ==================== TOOL CHANGES ====================
 
 * Helgrind:
 
+* Callgrind:
+  - callgrind_control now supports the --vgdb-prefix argument,
+    which is needed if valgrind was started with this same argument.
+
 * ==================== OTHER CHANGES ====================
+
+* New and modified GDB server monitor features:
+
+  - A new monitor command "v.info stats" that shows various valgrind core and
+    tool statistics.
 
 * ==================== FIXED BUGS ====================
 
@@ -24,12 +35,36 @@ To see details of a given bug, visit
   https://bugs.kde.org/show_bug.cgi?id=XXXXXX
 where XXXXXX is the bug number as listed below.
 
+175819  Support for ipv6 socket reporting with --track-fds
+308729  vex x86->IR: unhandled instruction bytes 0xf 0x5 (syscall) 
+325714  Empty vgcore but RLIMIT_CORE is big enough (too big) 
+325856  Make SGCheck fail gracefully on unsupported platforms
+326444  Cavium MIPS Octeon Specific Load Indexed Instructions
 326462  Refactor vgdb to isolate invoker stuff into separate module
 326983  Clear direction flag after tests on amd64.
+327212  Do not prepend the current directory to absolute path names.
 327238  Callgrind Assertion 'passed <= last_bb->cjmp_count' failed
+327284  s390x: Fix translation of the risbg instruction
 327837  dwz compressed alternate .debug_info and .debug_str not read correctly
 327916  DW_TAG_typedef may have no name
+328100  XABORT not implemented
 328205  Implement additional Xen hypercalls
+328455  s390x: SIGILL after emitting wrong register pair for ldxbr
+328711  valgrind.1 manpage "memcheck options" section is badly generated
+329612  Incorrect handling of AT_BASE for image execution 
+329956  valgrind crashes when lmw/stmw instructions are used on ppc64
+330459  --track-fds=yes doesn't track eventfds
+330469  Add clock_adjtime syscall support
+330939  Support for AMD's syscall instruction on x86
+330941  Typo in PRE(poll) syscall wrapper
+331254  Fix expected output for memcheck/tests/dw4
+331255  Fix race condition in test none/tests/coolo_sigaction
+331257  Fix type of jump buffer in test none/tests/faultstatus
+331305  configure uses bash specific syntax
+331337  s390x WARNING: unhandled syscall: 326 (dup3)
+331380  Syscall param timer_create(evp) points to uninitialised byte(s)
+n-i-bz  Fix KVM_CREATE_IRQCHIP ioctl handling
+n-i-bz  s390x: Fix memory corruption for multithreaded applications
 
 Release 3.9.0 (31 October 2013)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

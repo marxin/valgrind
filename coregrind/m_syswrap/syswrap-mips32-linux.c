@@ -1121,12 +1121,14 @@ static SyscallTableEntry syscall_main_table[] = {
    LINXY (__NR_timerfd_gettime,        sys_timerfd_gettime),         // 322
    LINXY (__NR_timerfd_settime,        sys_timerfd_settime),         // 323
    LINXY (__NR_signalfd4,              sys_signalfd4),               // 324
-   LINX_ (__NR_eventfd2,               sys_eventfd2),                // 325
+   LINXY (__NR_eventfd2,               sys_eventfd2),                // 325
    //..
    LINXY (__NR_pipe2,                  sys_pipe2),                   // 328
    LINXY (__NR_inotify_init1,          sys_inotify_init1),           // 329
    //..
    LINXY (__NR_prlimit64,              sys_prlimit64),               // 338
+   //..
+   LINXY (__NR_clock_adjtime,          sys_clock_adjtime),           // 341
    //..
    LINXY (__NR_process_vm_readv,       sys_process_vm_readv),        // 345
    LINX_ (__NR_process_vm_writev,      sys_process_vm_writev)        // 346

@@ -157,22 +157,27 @@ int poll_cond (short revents)
 
 /* Ensures we have a valid write file descriptor.
    Returns 1 if we have a valid write file descriptor,
-   0 if the write fd could not be opened. */
+   0 if the write fd is not valid/cannot be opened. */
 static
 int ensure_write_remote_desc(void)
 {
    struct vki_pollfd write_remote_desc_ok;
-   int ret;
+   SysRes ret;
    if (write_remote_desc != INVALID_DESCRIPTOR) {
       write_remote_desc_ok.fd = write_remote_desc;
       write_remote_desc_ok.events = VKI_POLLOUT;
       write_remote_desc_ok.revents = 0;
       ret = VG_(poll)(&write_remote_desc_ok, 1, 0);
-      if (ret && poll_cond(write_remote_desc_ok.revents)) {
-         dlog(1, "POLLcond %d closing write_remote_desc %d\n", 
-              write_remote_desc_ok.revents, write_remote_desc);
-         VG_(close) (write_remote_desc);
-         write_remote_desc = INVALID_DESCRIPTOR;
+      if (sr_isError(ret) 
+          || (sr_Res(ret) > 0 && poll_cond(write_remote_desc_ok.revents))) {
+        if (sr_isError(ret)) {
+          sr_perror(ret, "ensure_write_remote_desc: poll error\n");
+        } else {
+          dlog(0, "POLLcond %d closing write_remote_desc %d\n", 
+               write_remote_desc_ok.revents, write_remote_desc);
+        }
+        VG_(close) (write_remote_desc);
+        write_remote_desc = INVALID_DESCRIPTOR;
       }
    }
    if (write_remote_desc == INVALID_DESCRIPTOR) {
@@ -229,7 +234,6 @@ void remote_open (const HChar *name)
        offsetof(ThreadState, os_state) + offsetof(ThreadOSstate, lwpid),
        0};
    const int pid = VG_(getpid)();
-   const int name_default = strcmp(name, VG_(vgdb_prefix_default)()) == 0;
    Addr addr_shared;
    SysRes o;
    int shared_mem_fd = INVALID_DESCRIPTOR;
@@ -268,10 +272,11 @@ void remote_open (const HChar *name)
       VG_(umsg)("TO CONTROL THIS PROCESS USING vgdb (which you probably\n"
                 "don't want to do, unless you know exactly what you're doing,\n"
                 "or are doing some strange experiment):\n"
-                "  %s/../../bin/vgdb --pid=%d%s%s ...command...\n",
+                "  %s/../../bin/vgdb%s%s --pid=%d ...command...\n",
                 VG_(libdir),
-                pid, (name_default ? "" : " --vgdb-prefix="),
-                (name_default ? "" : name));
+                (VG_(arg_vgdb_prefix) ? " " : ""),
+                (VG_(arg_vgdb_prefix) ? VG_(arg_vgdb_prefix) : ""),
+                pid);
    }
    if (VG_(clo_verbosity) > 1 
        || VG_(clo_vgdb_error) < 999999999) {
@@ -280,11 +285,12 @@ void remote_open (const HChar *name)
          "TO DEBUG THIS PROCESS USING GDB: start GDB like this\n"
          "  /path/to/gdb %s\n"
          "and then give GDB the following command\n"
-         "  target remote | %s/../../bin/vgdb --pid=%d%s%s\n",
+         "  target remote | %s/../../bin/vgdb%s%s --pid=%d\n",
          VG_(args_the_exename),
          VG_(libdir),
-         pid, (name_default ? "" : " --vgdb-prefix="), 
-         (name_default ? "" : name)
+         (VG_(arg_vgdb_prefix) ? " " : ""),
+         (VG_(arg_vgdb_prefix) ? VG_(arg_vgdb_prefix) : ""),
+         pid
       );
       VG_(umsg)("--pid is optional if only one valgrind process is running\n");
       VG_(umsg)("\n");
@@ -439,10 +445,10 @@ void error_poll_cond(void)
    counter values maintained in shared memory by vgdb. */
 int remote_desc_activity(const char *msg)
 {
-   int ret;
+   int retval;
+   SysRes ret;
    const int looking_at = shared->written_by_vgdb;
    if (shared->seen_by_valgrind == looking_at)
-   //   if (last_looked_cntr == looking_at)
       return 0;
    if (remote_desc == INVALID_DESCRIPTOR)
       return 0;
@@ -450,23 +456,30 @@ int remote_desc_activity(const char *msg)
    /* poll the remote desc */
    remote_desc_pollfdread_activity.revents = 0;
    ret = VG_(poll) (&remote_desc_pollfdread_activity, 1, 0);
-   if (ret && poll_cond(remote_desc_pollfdread_activity.revents)) {
-      dlog(1, "POLLcond %d remote_desc_pollfdread %d\n", 
-           remote_desc_pollfdread_activity.revents, remote_desc);
-      error_poll_cond();
-      ret = 2;
+   if (sr_isError(ret)
+       || (sr_Res(ret) && poll_cond(remote_desc_pollfdread_activity.revents))) {
+     if (sr_isError(ret)) {
+       sr_perror(ret, "remote_desc_activity: poll error\n");
+     } else {
+       dlog(0, "POLLcond %d remote_desc_pollfdread %d\n", 
+            remote_desc_pollfdread_activity.revents, remote_desc);
+       error_poll_cond();
+     }
+     retval = 2;
+   } else {
+     retval = sr_Res(ret);
    }
    dlog(1,
         "remote_desc_activity %s %d last_looked_cntr %d looking_at %d"
         " shared->written_by_vgdb %d shared->seen_by_valgrind %d"
-        " ret %d\n", 
+        " retval %d\n", 
         msg, remote_desc, last_looked_cntr, looking_at, 
         shared->written_by_vgdb, shared->seen_by_valgrind,
-        ret);
+        retval);
    /* if no error from poll, indicate we have "seen" up to looking_at */
-   if (ret != 2)
+   if (retval == 1)
       last_looked_cntr = looking_at;
-   return ret;
+   return retval;
 }
 
 /* Convert hex digit A to a number.  */
@@ -803,7 +816,7 @@ int readchar (int single)
    static unsigned char buf[PBUFSIZ];
    static int bufcnt = 0;
    static unsigned char *bufp;
-   int ret;
+   SysRes ret;
   
    if (bufcnt-- > 0)
       return *bufp++;
@@ -815,9 +828,13 @@ int readchar (int single)
       wait for some characters to arrive */
    remote_desc_pollfdread_activity.revents = 0;
    ret = VG_(poll)(&remote_desc_pollfdread_activity, 1, -1);
-   if (ret != 1) {
-      dlog(0, "readchar: poll got %d\n", ret);
-      return -1;
+   if (sr_isError(ret) || sr_Res(ret) != 1) {
+     if (sr_isError(ret)) {
+        sr_perror(ret, "readchar: poll error\n");
+     } else {
+        dlog(0, "readchar: poll got %d, expecting 1\n", (int)sr_Res(ret));
+     }
+     return -1;
    }
    if (single)
       bufcnt = VG_(read) (remote_desc, buf, 1);
@@ -1103,7 +1120,7 @@ int decode_X_packet (char *from, int packet_len, CORE_ADDR *mem_addr_ptr,
 }
 
 
-/* Return the path prefix for the named pipes (FIFOs) used by vgdb/gdb
+/* Return the default path prefix for the named pipes (FIFOs) used by vgdb/gdb
    to communicate with valgrind */
 HChar *
 VG_(vgdb_prefix_default)(void)

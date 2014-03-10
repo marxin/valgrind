@@ -106,7 +106,11 @@ Bool VG_(resolve_filename) ( Int fd, HChar* buf, Int n_buf )
 
 SysRes VG_(mknod) ( const HChar* pathname, Int mode, UWord dev )
 {  
-#  if defined(VGO_linux) || defined(VGO_darwin)
+#  if defined(VGP_arm64_linux)
+   /* ARM64 wants to use __NR_mknodat rather than __NR_mknod. */
+   SysRes res = VG_(do_syscall4)(__NR_mknodat,
+                                 VKI_AT_FDCWD, (UWord)pathname, mode, dev);
+#  elif defined(VGO_linux) || defined(VGO_darwin)
    SysRes res = VG_(do_syscall3)(__NR_mknod,
                                  (UWord)pathname, mode, dev);
 #  else
@@ -116,8 +120,12 @@ SysRes VG_(mknod) ( const HChar* pathname, Int mode, UWord dev )
 }
 
 SysRes VG_(open) ( const HChar* pathname, Int flags, Int mode )
-{  
-#  if defined(VGO_linux)
+{
+#  if defined(VGP_arm64_linux)
+   /* ARM64 wants to use __NR_openat rather than __NR_open. */
+   SysRes res = VG_(do_syscall4)(__NR_openat,
+                                 VKI_AT_FDCWD, (UWord)pathname, flags, mode);
+#  elif defined(VGO_linux)
    SysRes res = VG_(do_syscall3)(__NR_open,
                                  (UWord)pathname, flags, mode);
 #  elif defined(VGO_darwin)
@@ -204,6 +212,9 @@ Int VG_(pipe) ( Int fd[2] )
    } else {
       return -1;
    }
+#  elif defined(VGP_arm64_linux)
+   SysRes res = VG_(do_syscall2)(__NR_pipe2, (UWord)fd, 0);
+   return sr_isError(res) ? -1 : 0;
 #  elif defined(VGO_linux)
    SysRes res = VG_(do_syscall1)(__NR_pipe, (UWord)fd);
    return sr_isError(res) ? -1 : 0;
@@ -289,8 +300,14 @@ SysRes VG_(stat) ( const HChar* file_name, struct vg_stat* vgbuf )
      }
    }
 #  endif /* defined(__NR_stat64) */
+   /* This is the fallback ("vanilla version"). */
    { struct vki_stat buf;
+#    if defined(VGP_arm64_linux)
+     res = VG_(do_syscall3)(__NR3264_fstatat, VKI_AT_FDCWD,
+                                              (UWord)file_name, (UWord)&buf);
+#    else
      res = VG_(do_syscall2)(__NR_stat, (UWord)file_name, (UWord)&buf);
+#    endif
      if (!sr_isError(res))
         TRANSLATE_TO_vg_stat(vgbuf, &buf);
      return res;
@@ -385,7 +402,12 @@ Int VG_(rename) ( const HChar* old_name, const HChar* new_name )
 
 Int VG_(unlink) ( const HChar* file_name )
 {
+#  if defined(VGP_arm64_linux)
+   SysRes res = VG_(do_syscall2)(__NR_unlinkat, VKI_AT_FDCWD,
+                                                (UWord)file_name);
+#  else
    SysRes res = VG_(do_syscall1)(__NR_unlink, (UWord)file_name);
+#  endif
    return sr_isError(res) ? (-1) : 0;
 }
 
@@ -456,17 +478,28 @@ Bool VG_(get_startup_wd) ( HChar* buf, SizeT size )
    return True;
 }
 
-Int VG_(poll) (struct vki_pollfd *fds, Int nfds, Int timeout)
+SysRes VG_(poll) (struct vki_pollfd *fds, Int nfds, Int timeout)
 {
    SysRes res;
-#  if defined(VGO_linux)
+#  if defined(VGP_arm64_linux)
+   /* ARM64 wants to use __NR_ppoll rather than __NR_poll. */
+   struct vki_timespec timeout_ts;
+   if (timeout >= 0) {
+      timeout_ts.tv_sec = timeout / 1000;
+      timeout_ts.tv_nsec = ((long)timeout % 1000) * 1000000;
+   }
+   res = VG_(do_syscall4)(__NR_ppoll,
+                          (UWord)fds, nfds, 
+                          (UWord)(timeout >= 0 ? &timeout_ts : NULL),
+                          (UWord)NULL);
+#  elif defined(VGO_linux)
    res = VG_(do_syscall3)(__NR_poll, (UWord)fds, nfds, timeout);
 #  elif defined(VGO_darwin)
    res = VG_(do_syscall3)(__NR_poll_nocancel, (UWord)fds, nfds, timeout);
 #  else
 #    error "Unknown OS"
 #  endif
-   return sr_isError(res) ? -1 : sr_Res(res);
+   return res;
 }
 
 
@@ -474,7 +507,12 @@ Int VG_(readlink) (const HChar* path, HChar* buf, UInt bufsiz)
 {
    SysRes res;
    /* res = readlink( path, buf, bufsiz ); */
+#  if defined(VGP_arm64_linux)
+   res = VG_(do_syscall4)(__NR_readlinkat, VKI_AT_FDCWD,
+                                           (UWord)path, (UWord)buf, bufsiz);
+#  else
    res = VG_(do_syscall3)(__NR_readlink, (UWord)path, (UWord)buf, bufsiz);
+#  endif
    return sr_isError(res) ? -1 : sr_Res(res);
 }
 
@@ -509,7 +547,11 @@ Int VG_(access) ( const HChar* path, Bool irusr, Bool iwusr, Bool ixusr )
    UWord w = (irusr ? VKI_R_OK : 0)
              | (iwusr ? VKI_W_OK : 0)
              | (ixusr ? VKI_X_OK : 0);
+#  if defined(VGP_arm64_linux)
+   SysRes res = VG_(do_syscall3)(__NR_faccessat, VKI_AT_FDCWD, (UWord)path, w);
+#  else
    SysRes res = VG_(do_syscall2)(__NR_access, (UWord)path, w);
+#  endif
    return sr_isError(res) ? 1 : 0;   
 
 #  if defined(VGO_linux)
@@ -624,7 +666,8 @@ SysRes VG_(pread) ( Int fd, void* buf, Int count, OffT offset )
    return res;
 #  elif defined(VGP_amd64_linux) \
       || defined(VGP_ppc64_linux) || defined(VGP_s390x_linux) \
-      || defined(VGP_mips64_linux) 
+      || defined(VGP_mips64_linux) \
+      || defined(VGP_arm64_linux)
    res = VG_(do_syscall4)(__NR_pread64, fd, (UWord)buf, count, offset);
    return res;
 #  elif defined(VGP_amd64_darwin)
@@ -877,7 +920,8 @@ Int VG_(socket) ( Int domain, Int type, Int protocol )
    return sr_isError(res) ? -1 : sr_Res(res);
 
 #  elif defined(VGP_amd64_linux) || defined(VGP_arm_linux) \
-        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux)
+        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux) \
+        || defined(VGP_arm64_linux)
    SysRes res;
    res = VG_(do_syscall3)(__NR_socket, domain, type, protocol );
    return sr_isError(res) ? -1 : sr_Res(res);
@@ -916,7 +960,8 @@ Int my_connect ( Int sockfd, struct vki_sockaddr_in* serv_addr, Int addrlen )
    return sr_isError(res) ? -1 : sr_Res(res);
 
 #  elif defined(VGP_amd64_linux) || defined(VGP_arm_linux) \
-        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux)
+        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux) \
+        || defined(VGP_arm64_linux)
    SysRes res;
    res = VG_(do_syscall3)(__NR_connect, sockfd, (UWord)serv_addr, addrlen);
    return sr_isError(res) ? -1 : sr_Res(res);
@@ -955,7 +1000,8 @@ Int VG_(write_socket)( Int sd, const void *msg, Int count )
    return sr_isError(res) ? -1 : sr_Res(res);
 
 #  elif defined(VGP_amd64_linux) || defined(VGP_arm_linux) \
-        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux)
+        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux) \
+        || defined(VGP_arm64_linux)
    SysRes res;
    res = VG_(do_syscall6)(__NR_sendto, sd, (UWord)msg, 
                                        count, VKI_MSG_NOSIGNAL, 0,0);
@@ -985,7 +1031,7 @@ Int VG_(getsockname) ( Int sd, struct vki_sockaddr *name, Int *namelen)
    return sr_isError(res) ? -1 : sr_Res(res);
 
 #  elif defined(VGP_amd64_linux) || defined(VGP_arm_linux) \
-        || defined(VGP_mips64_linux)
+        || defined(VGP_mips64_linux) || defined(VGP_arm64_linux)
    SysRes res;
    res = VG_(do_syscall3)( __NR_getsockname,
                            (UWord)sd, (UWord)name, (UWord)namelen );
@@ -1016,7 +1062,7 @@ Int VG_(getpeername) ( Int sd, struct vki_sockaddr *name, Int *namelen)
    return sr_isError(res) ? -1 : sr_Res(res);
 
 #  elif defined(VGP_amd64_linux) || defined(VGP_arm_linux) \
-        || defined(VGP_mips64_linux)
+        || defined(VGP_mips64_linux) || defined(VGP_arm64_linux)
    SysRes res;
    res = VG_(do_syscall3)( __NR_getpeername,
                            (UWord)sd, (UWord)name, (UWord)namelen );
@@ -1049,7 +1095,8 @@ Int VG_(getsockopt) ( Int sd, Int level, Int optname, void *optval,
    return sr_isError(res) ? -1 : sr_Res(res);
 
 #  elif defined(VGP_amd64_linux) || defined(VGP_arm_linux) \
-        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux)
+        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux) \
+        || defined(VGP_arm64_linux)
    SysRes res;
    res = VG_(do_syscall5)( __NR_getsockopt,
                            (UWord)sd, (UWord)level, (UWord)optname, 
@@ -1085,7 +1132,8 @@ Int VG_(setsockopt) ( Int sd, Int level, Int optname, void *optval,
    return sr_isError(res) ? -1 : sr_Res(res);
 
 #  elif defined(VGP_amd64_linux) || defined(VGP_arm_linux) \
-        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux)
+        || defined(VGP_mips32_linux) || defined(VGP_mips64_linux) \
+        || defined(VGP_arm64_linux)
    SysRes res;
    res = VG_(do_syscall5)( __NR_setsockopt,
                            (UWord)sd, (UWord)level, (UWord)optname, 

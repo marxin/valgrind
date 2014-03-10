@@ -63,8 +63,8 @@ typedef struct {
 
 /* PAGE_SHIFT determines the page size, unfortunately
    page size might vary between 32-bit and 64-bit ppc kernels */
-extern unsigned long VKI_PAGE_SHIFT;
-extern unsigned long VKI_PAGE_SIZE;
+extern UWord VKI_PAGE_SHIFT;
+extern UWord VKI_PAGE_SIZE;
 #define VKI_MAX_PAGE_SHIFT	16
 #define VKI_MAX_PAGE_SIZE	(1UL << VKI_MAX_PAGE_SHIFT)
 
@@ -920,6 +920,13 @@ struct vki_shminfo64 {
    unsigned long	__unused3;
    unsigned long	__unused4;
 };
+
+//----------------------------------------------------------------------
+// From linux-2.6.8.1/include/asm-generic/errno.h
+//----------------------------------------------------------------------
+
+#define	VKI_ENOSYS       38  /* Function not implemented */
+#define	VKI_EOVERFLOW    75  /* Value too large for defined data type */
 
 //.. //----------------------------------------------------------------------
 //.. // DRM ioctls

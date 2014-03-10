@@ -209,6 +209,8 @@ static void run_a_thread_NORETURN ( Word tidW )
       /* This releases the run lock */
       VG_(exit_thread)(tid);
       vg_assert(tst->status == VgTs_Zombie);
+      vg_assert(sizeof(tst->status) == 4);
+      vg_assert(sizeof(tst->os_state.exitcode) == sizeof(Word));
 
       INNER_REQUEST (VALGRIND_STACK_DEREGISTER (registered_vgstack_id));
 
@@ -264,6 +266,16 @@ static void run_a_thread_NORETURN ( Word tidW )
          : "r" (VgTs_Empty), "n" (__NR_exit), "m" (tst->os_state.exitcode)
          : "r0", "r7"
       );
+#elif defined(VGP_arm64_linux)
+      asm volatile (
+         "str  %w1, %0\n"     /* set tst->status = VgTs_Empty (32-bit store) */
+         "mov  x8,  %2\n"     /* set %r7 = __NR_exit */
+         "ldr  x0,  %3\n"     /* set %r0 = tst->os_state.exitcode */
+         "svc  0x00000000\n"  /* exit(tst->os_state.exitcode) */
+         : "=m" (tst->status)
+         : "r" (VgTs_Empty), "n" (__NR_exit), "m" (tst->os_state.exitcode)
+         : "r0", "r7"
+      );
 #elif defined(VGP_s390x_linux)
       asm volatile (
          "st   %1, %0\n"        /* set tst->status = VgTs_Empty */
@@ -276,7 +288,7 @@ static void run_a_thread_NORETURN ( Word tidW )
 #elif defined(VGP_mips32_linux) || defined(VGP_mips64_linux)
       asm volatile (
          "sw   %1, %0\n\t"     /* set tst->status = VgTs_Empty */
-         "li  	$2, %2\n\t"     /* set v0 = __NR_exit */
+         "li   $2, %2\n\t"     /* set v0 = __NR_exit */
          "lw   $4, %3\n\t"     /* set a0 = tst->os_state.exitcode */
          "syscall\n\t"         /* exit(tst->os_state.exitcode) */
          "nop"
@@ -428,7 +440,7 @@ SysRes ML_(do_fork_clone) ( ThreadId tid, UInt flags,
 #if defined(VGP_x86_linux) \
     || defined(VGP_ppc32_linux) || defined(VGP_ppc64_linux) \
     || defined(VGP_arm_linux) || defined(VGP_mips32_linux) \
-    || defined(VGP_mips64_linux)
+    || defined(VGP_mips64_linux) || defined(VGP_arm64_linux)
    res = VG_(do_syscall5)( __NR_clone, flags, 
                            (UWord)NULL, (UWord)parent_tidptr, 
                            (UWord)NULL, (UWord)child_tidptr );
@@ -800,6 +812,40 @@ PRE(sys_adjtimex)
 POST(sys_adjtimex)
 {
    POST_MEM_WRITE( ARG1, sizeof(struct vki_timex) );
+}
+
+PRE(sys_clock_adjtime)
+{
+   struct vki_timex *tx = (struct vki_timex *)ARG2;
+   PRINT("sys_clock_adjtime ( %ld, %#lx )", ARG1,ARG2);
+   PRE_REG_READ2(long, "clock_adjtime", vki_clockid_t, id, struct timex *, buf);
+   PRE_MEM_READ( "clock_adjtime(timex->modes)", ARG2, sizeof(tx->modes));
+
+#define ADJX(bits,field)                                \
+   if (tx->modes & (bits))                              \
+      PRE_MEM_READ( "clock_adjtime(timex->"#field")",   \
+                    (Addr)&tx->field, sizeof(tx->field))
+
+   if (tx->modes & VKI_ADJ_ADJTIME) {
+      if (!(tx->modes & VKI_ADJ_OFFSET_READONLY))
+         PRE_MEM_READ( "clock_adjtime(timex->offset)", (Addr)&tx->offset, sizeof(tx->offset));
+   } else {
+      ADJX(VKI_ADJ_OFFSET, offset);
+      ADJX(VKI_ADJ_FREQUENCY, freq);
+      ADJX(VKI_ADJ_MAXERROR, maxerror);
+      ADJX(VKI_ADJ_ESTERROR, esterror);
+      ADJX(VKI_ADJ_STATUS, status);
+      ADJX(VKI_ADJ_TIMECONST|VKI_ADJ_TAI, constant);
+      ADJX(VKI_ADJ_TICK, tick);
+   }
+#undef ADJX
+
+   PRE_MEM_WRITE( "adjtimex(timex)", ARG2, sizeof(struct vki_timex));
+}
+
+POST(sys_clock_adjtime)
+{
+   POST_MEM_WRITE( ARG2, sizeof(struct vki_timex) );
 }
 
 PRE(sys_ioperm)
@@ -1223,7 +1269,7 @@ PRE(sys_ppoll)
                     (Addr)(&ufds[i].fd), sizeof(ufds[i].fd) );
       PRE_MEM_READ( "ppoll(ufds.events)",
                     (Addr)(&ufds[i].events), sizeof(ufds[i].events) );
-      PRE_MEM_WRITE( "ppoll(ufd.reventss)",
+      PRE_MEM_WRITE( "ppoll(ufd.revents)",
                      (Addr)(&ufds[i].revents), sizeof(ufds[i].revents) );
    }
 
@@ -2129,8 +2175,19 @@ PRE(sys_timer_create)
    PRE_REG_READ3(long, "timer_create",
                  vki_clockid_t, clockid, struct sigevent *, evp,
                  vki_timer_t *, timerid);
-   if (ARG2 != 0)
-      PRE_MEM_READ( "timer_create(evp)", ARG2, sizeof(struct vki_sigevent) );
+   if (ARG2 != 0) {
+      struct vki_sigevent *evp = (struct vki_sigevent *) ARG2;
+      PRE_MEM_READ( "timer_create(evp.sigev_value)", (Addr)&evp->sigev_value,
+                    sizeof(vki_sigval_t) );
+      PRE_MEM_READ( "timer_create(evp.sigev_signo)", (Addr)&evp->sigev_signo,
+                    sizeof(int) );
+      PRE_MEM_READ( "timer_create(evp.sigev_notify)", (Addr)&evp->sigev_notify,
+                    sizeof(int) );
+      if (ML_(safe_to_deref)(&evp->sigev_notify, sizeof(int))
+          && (evp->sigev_notify & VKI_SIGEV_THREAD_ID) != 0)
+         PRE_MEM_READ( "timer_create(evp.sigev_notify_thread_id)",
+                       (Addr)&evp->vki_sigev_notify_thread_id, sizeof(int) );
+   }
    PRE_MEM_WRITE( "timer_create(timerid)", ARG3, sizeof(vki_timer_t) );
 }
 POST(sys_timer_create)
@@ -5482,9 +5539,10 @@ PRE(sys_ioctl)
       /* SCSI no operand */
    case VKI_SCSI_IOCTL_DOORLOCK:
    case VKI_SCSI_IOCTL_DOORUNLOCK:
-      
+
    /* KVM ioctls that dont check for a numeric value as parameter */
    case VKI_KVM_S390_ENABLE_SIE:
+   case VKI_KVM_CREATE_IRQCHIP:
    case VKI_KVM_S390_INITIAL_RESET:
 
    /* vhost without parameter */
@@ -6764,7 +6822,8 @@ PRE(sys_ioctl)
       /* These just take an int by value */
       break;
 
-#  if defined(VGPV_arm_linux_android) || defined(VGPV_x86_linux_android)
+#  if defined(VGPV_arm_linux_android) || defined(VGPV_x86_linux_android) \
+      || defined(VGPV_mips32_linux_android)
    /* ashmem */
    case VKI_ASHMEM_GET_SIZE:
    case VKI_ASHMEM_SET_SIZE:
@@ -6842,7 +6901,7 @@ PRE(sys_ioctl)
                        ir->num_rsp * sizeof(struct vki_inquiry_info));
       }
       break;
-      
+
    /* KVM ioctls that check for a numeric value as parameter */
    case VKI_KVM_GET_API_VERSION:
    case VKI_KVM_CREATE_VM:
@@ -6957,7 +7016,8 @@ POST(sys_ioctl)
 
    /* --- BEGIN special IOCTL handlers for specific Android hardware --- */
 
-#  if defined(VGPV_arm_linux_android) || defined(VGPV_x86_linux_android)
+#  if defined(VGPV_arm_linux_android) || defined(VGPV_x86_linux_android) \
+      || defined(VGPV_mips32_linux_android)
 
 #  if defined(ANDROID_HARDWARE_nexus_s)
 
@@ -7875,7 +7935,8 @@ POST(sys_ioctl)
       }
       break;
 
-#  if defined(VGPV_arm_linux_android) || defined(VGPV_x86_linux_android)
+#  if defined(VGPV_arm_linux_android) || defined(VGPV_x86_linux_android) \
+      || defined(VGPV_mips32_linux_android)
    /* ashmem */
    case VKI_ASHMEM_GET_SIZE:
    case VKI_ASHMEM_SET_SIZE:
@@ -7933,6 +7994,7 @@ POST(sys_ioctl)
    case VKI_KVM_GET_VCPU_MMAP_SIZE:
    case VKI_KVM_S390_ENABLE_SIE:
    case VKI_KVM_CREATE_VCPU:
+   case VKI_KVM_CREATE_IRQCHIP:
    case VKI_KVM_RUN:
    case VKI_KVM_S390_INITIAL_RESET:
       break;

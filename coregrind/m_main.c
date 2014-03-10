@@ -562,7 +562,9 @@ void main_process_cmd_line_options ( /*OUT*/Bool* logging_to_fd,
       }
       else if VG_INT_CLO (arg, "--vgdb-poll",      VG_(clo_vgdb_poll)) {}
       else if VG_INT_CLO (arg, "--vgdb-error",     VG_(clo_vgdb_error)) {}
-      else if VG_STR_CLO (arg, "--vgdb-prefix",    VG_(clo_vgdb_prefix)) {}
+      else if VG_STR_CLO (arg, "--vgdb-prefix",    VG_(clo_vgdb_prefix)) {
+         VG_(arg_vgdb_prefix) = arg;
+      }
       else if VG_BOOL_CLO(arg, "--vgdb-shadow-registers",
                             VG_(clo_vgdb_shadow_registers)) {}
       else if VG_BOOL_CLO(arg, "--db-attach",      VG_(clo_db_attach)) {}
@@ -2021,6 +2023,8 @@ Int valgrind_main ( Int argc, HChar **argv, HChar **envp )
       iters = 5;
 #     elif defined(VGP_arm_linux)
       iters = 5;
+#     elif defined(VGP_arm64_linux)
+      iters = 5;
 #     elif defined(VGP_s390x_linux)
       iters = 10;
 #     elif defined(VGP_mips32_linux) || defined(VGP_mips64_linux)
@@ -2908,6 +2912,31 @@ asm("\n"
     "\t.word "VG_STRINGIFY(VG_STACK_GUARD_SZB)"\n"
     "\t.word "VG_STRINGIFY(VG_STACK_ACTIVE_SZB)"\n"
 );
+#elif defined(VGP_arm64_linux)
+asm("\n"
+    "\t.text\n"
+    "\t.align 2\n"
+    "\t.type _start,#function\n"
+    "\t.global _start\n"
+    "_start:\n"
+    "\tadrp x0, vgPlain_interim_stack\n"
+    "\tadd  x0, x0, :lo12:vgPlain_interim_stack\n"
+    // The next 2 assume that VG_STACK_GUARD_SZB fits in 32 bits
+    "\tmov  x1, (("VG_STRINGIFY(VG_STACK_GUARD_SZB)") >> 0) & 0xFFFF\n"
+    "\tmovk x1, (("VG_STRINGIFY(VG_STACK_GUARD_SZB)") >> 16) & 0xFFFF,"
+                " lsl 16\n"
+    "\tadd  x0, x0, x1\n"
+    // The next 2 assume that VG_STACK_ACTIVE_SZB fits in 32 bits
+    "\tmov  x1, (("VG_STRINGIFY(VG_STACK_ACTIVE_SZB)") >> 0) & 0xFFFF\n"
+    "\tmovk x1, (("VG_STRINGIFY(VG_STACK_ACTIVE_SZB)") >> 16) & 0xFFFF,"
+                " lsl 16\n"
+    "\tadd  x0, x0, x1\n"
+    "\tand  x0, x0, -16\n"
+    "\tmov  x1, sp\n"
+    "\tmov  sp, x0\n"
+    "\tmov  x0, x1\n"
+    "\tb _start_in_C_linux\n"
+);
 #elif defined(VGP_mips32_linux)
 asm("\n"
     "\t.type _gp_disp,@object\n"
@@ -3033,7 +3062,8 @@ void _start_in_C_linux ( UWord* pArgc )
 
    the_iicii.sp_at_startup = (Addr)pArgc;
 
-#  if defined(VGP_ppc32_linux) || defined(VGP_ppc64_linux)
+#  if defined(VGP_ppc32_linux) || defined(VGP_ppc64_linux) \
+      || defined(VGP_arm64_linux)
    {
       /* ppc/ppc64 can be configured with different page sizes.
          Determine this early.  This is an ugly hack and really should

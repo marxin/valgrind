@@ -8,7 +8,7 @@
 ##------------------------------------------------------------##
 
 # Process this file with autoconf to produce a configure script.
-AC_INIT([Valgrind],[3.9.0.SVN],[valgrind-users@lists.sourceforge.net])
+AC_INIT([Valgrind],[3.10.0.SVN],[valgrind-users@lists.sourceforge.net])
 AC_CONFIG_SRCDIR(coregrind/m_main.c)
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
@@ -194,6 +194,11 @@ case "${host_cpu}" in
 	AC_MSG_RESULT([ok (${host_cpu})])
 	ARCH_MAX="arm"
 	;;
+
+     aarch64*)
+       AC_MSG_RESULT([ok (${host_cpu})])
+       ARCH_MAX="arm64"
+       ;;
 
      mips)
         AC_MSG_RESULT([ok (${host_cpu})])
@@ -559,6 +564,35 @@ case "$ARCH_MAX-$VGCONF_OS" in
         valt_load_address_sec_inner="0xUNSET"
 	AC_MSG_RESULT([ok (${host_cpu}-${host_os})])
 	;;
+     arm64-linux)
+        valt_load_address_sec_norml="0xUNSET"
+        valt_load_address_sec_inner="0xUNSET"
+        if test x$vg_cv_only64bit = xyes; then
+           VGCONF_ARCH_PRI="arm64"
+           VGCONF_ARCH_SEC=""
+           VGCONF_PLATFORM_PRI_CAPS="ARM64_LINUX"
+           VGCONF_PLATFORM_SEC_CAPS=""
+           valt_load_address_pri_norml="0x38000000"
+           valt_load_address_pri_inner="0x28000000"
+        elif test x$vg_cv_only32bit = xyes; then
+           VGCONF_ARCH_PRI="arm"
+           VGCONF_ARCH_SEC=""
+           VGCONF_PLATFORM_PRI_CAPS="ARM_LINUX"
+           VGCONF_PLATFORM_SEC_CAPS=""
+           valt_load_address_pri_norml="0x38000000"
+           valt_load_address_pri_inner="0x28000000"
+        else
+           VGCONF_ARCH_PRI="arm64"
+           VGCONF_ARCH_SEC="arm"
+           VGCONF_PLATFORM_PRI_CAPS="ARM64_LINUX"
+           VGCONF_PLATFORM_SEC_CAPS="ARM_LINUX"
+           valt_load_address_pri_norml="0x38000000"
+           valt_load_address_pri_inner="0x28000000"
+           valt_load_address_sec_norml="0x38000000"
+           valt_load_address_sec_inner="0x28000000"
+        fi
+        AC_MSG_RESULT([ok (${ARCH_MAX}-${VGCONF_OS})])
+        ;;
      s390x-linux)
         VGCONF_ARCH_PRI="s390x"
         VGCONF_ARCH_SEC=""
@@ -624,7 +658,10 @@ AM_CONDITIONAL(VGCONF_ARCHS_INCLUDE_PPC32,
 AM_CONDITIONAL(VGCONF_ARCHS_INCLUDE_PPC64, 
                test x$VGCONF_PLATFORM_PRI_CAPS = xPPC64_LINUX )
 AM_CONDITIONAL(VGCONF_ARCHS_INCLUDE_ARM,   
-               test x$VGCONF_PLATFORM_PRI_CAPS = xARM_LINUX )
+               test x$VGCONF_PLATFORM_PRI_CAPS = xARM_LINUX \
+                 -o x$VGCONF_PLATFORM_SEC_CAPS = xARM_LINUX )
+AM_CONDITIONAL(VGCONF_ARCHS_INCLUDE_ARM64, 
+               test x$VGCONF_PLATFORM_PRI_CAPS = xARM64_LINUX )
 AM_CONDITIONAL(VGCONF_ARCHS_INCLUDE_S390X,
                test x$VGCONF_PLATFORM_PRI_CAPS = xS390X_LINUX )
 AM_CONDITIONAL(VGCONF_ARCHS_INCLUDE_MIPS32,
@@ -645,7 +682,10 @@ AM_CONDITIONAL(VGCONF_PLATFORMS_INCLUDE_PPC32_LINUX,
 AM_CONDITIONAL(VGCONF_PLATFORMS_INCLUDE_PPC64_LINUX, 
                test x$VGCONF_PLATFORM_PRI_CAPS = xPPC64_LINUX)
 AM_CONDITIONAL(VGCONF_PLATFORMS_INCLUDE_ARM_LINUX, 
-               test x$VGCONF_PLATFORM_PRI_CAPS = xARM_LINUX)
+               test x$VGCONF_PLATFORM_PRI_CAPS = xARM_LINUX \
+                 -o x$VGCONF_PLATFORM_SEC_CAPS = xARM_LINUX)
+AM_CONDITIONAL(VGCONF_PLATFORMS_INCLUDE_ARM64_LINUX, 
+               test x$VGCONF_PLATFORM_PRI_CAPS = xARM64_LINUX)
 AM_CONDITIONAL(VGCONF_PLATFORMS_INCLUDE_S390X_LINUX,
                test x$VGCONF_PLATFORM_PRI_CAPS = xS390X_LINUX \
                  -o x$VGCONF_PLATFORM_SEC_CAPS = xS390X_LINUX)
@@ -653,7 +693,6 @@ AM_CONDITIONAL(VGCONF_PLATFORMS_INCLUDE_MIPS32_LINUX,
                test x$VGCONF_PLATFORM_PRI_CAPS = xMIPS32_LINUX)
 AM_CONDITIONAL(VGCONF_PLATFORMS_INCLUDE_MIPS64_LINUX,
                test x$VGCONF_PLATFORM_PRI_CAPS = xMIPS64_LINUX)
-
 AM_CONDITIONAL(VGCONF_PLATFORMS_INCLUDE_X86_DARWIN,   
                test x$VGCONF_PLATFORM_PRI_CAPS = xX86_DARWIN \
                  -o x$VGCONF_PLATFORM_SEC_CAPS = xX86_DARWIN)
@@ -670,6 +709,7 @@ AM_CONDITIONAL(VGCONF_OS_IS_LINUX,
                  -o x$VGCONF_PLATFORM_PRI_CAPS = xPPC32_LINUX \
                  -o x$VGCONF_PLATFORM_PRI_CAPS = xPPC64_LINUX \
                  -o x$VGCONF_PLATFORM_PRI_CAPS = xARM_LINUX \
+                 -o x$VGCONF_PLATFORM_PRI_CAPS = xARM64_LINUX \
                  -o x$VGCONF_PLATFORM_PRI_CAPS = xS390X_LINUX \
                  -o x$VGCONF_PLATFORM_PRI_CAPS = xMIPS32_LINUX \
                  -o x$VGCONF_PLATFORM_PRI_CAPS = xMIPS64_LINUX)
@@ -731,7 +771,7 @@ AC_ARG_WITH(pagesize,
  
 if test "$psize" = "0"; then
     psizer=`getconf PAGESIZE`
-    let "psize=${psizer}/1024"
+    psize=$((${psizer}/1024))
 fi
 
 if test "$psize" = "4"; then
@@ -918,6 +958,13 @@ case "${GLIBC_VERSION}" in
 	DEFAULT_SUPP="glibc-2.34567-NPTL-helgrind.supp ${DEFAULT_SUPP}"
 	DEFAULT_SUPP="glibc-2.X-drd.supp ${DEFAULT_SUPP}"
 	;;
+     2.19)
+	AC_MSG_RESULT(2.19 family)
+	AC_DEFINE([GLIBC_2_19], 1, [Define to 1 if you're using glibc 2.19.x])
+	DEFAULT_SUPP="glibc-2.X.supp ${DEFAULT_SUPP}"
+	DEFAULT_SUPP="glibc-2.34567-NPTL-helgrind.supp ${DEFAULT_SUPP}"
+	DEFAULT_SUPP="glibc-2.X-drd.supp ${DEFAULT_SUPP}"
+	;;
      darwin)
 	AC_MSG_RESULT(Darwin)
 	AC_DEFINE([DARWIN_LIBC], 1, [Define to 1 if you're using Darwin])
@@ -931,8 +978,8 @@ case "${GLIBC_VERSION}" in
 
      *)
 	AC_MSG_RESULT([unsupported version ${GLIBC_VERSION}])
-	AC_MSG_ERROR([Valgrind requires glibc version 2.2 - 2.17])
-	AC_MSG_ERROR([or Darwin libc])
+	AC_MSG_ERROR([Valgrind requires glibc version 2.2 - 2.19])
+	AC_MSG_ERROR([or Darwin or Bionic libc])
 	;;
 esac
 
@@ -957,9 +1004,9 @@ DEFAULT_SUPP="exp-sgcheck.supp ${DEFAULT_SUPP}"
 # Normally the PLAT = (ARCH, OS) characterisation of the platform is enough.
 # But there are times where we need a bit more control.  The motivating
 # and currently only case is Android: this is almost identical to
-# {x86,arm}-linux, but not quite.  So this introduces the concept of platform
-# variant tags, which get passed in the compile as -DVGPV_<arch>_<os>_<variant>
-# along with the main -DVGP_<arch>_<os> definition.
+# {x86,arm,mips}-linux, but not quite.  So this introduces the concept of
+# platform variant tags, which get passed in the compile as
+# -DVGPV_<arch>_<os>_<variant> along with the main -DVGP_<arch>_<os> definition.
 #
 # In almost all cases, the <variant> bit is "vanilla".  But for Android
 # it is "android" instead.
@@ -1450,6 +1497,86 @@ CFLAGS=$safe_CFLAGS
 AC_SUBST(FLAG_M64)
 
 
+# does this compiler support -march=mips32 (mips32 default) ?
+AC_MSG_CHECKING([if gcc accepts -march=mips32])
+
+safe_CFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -march=mips32"
+
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[
+  return 0;
+]])], [
+FLAG_MIPS32="-march=mips32"
+AC_MSG_RESULT([yes])
+], [
+FLAG_MIPS32=""
+AC_MSG_RESULT([no])
+])
+CFLAGS=$safe_CFLAGS
+
+AC_SUBST(FLAG_MIPS32)
+
+
+# does this compiler support -march=mips64 (mips64 default) ?
+AC_MSG_CHECKING([if gcc accepts -march=mips64])
+
+safe_CFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -march=mips64"
+
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[
+  return 0;
+]])], [
+FLAG_MIPS64="-march=mips64"
+AC_MSG_RESULT([yes])
+], [
+FLAG_MIPS64=""
+AC_MSG_RESULT([no])
+])
+CFLAGS=$safe_CFLAGS
+
+AC_SUBST(FLAG_MIPS64)
+
+
+# does this compiler support -march=octeon (Cavium OCTEON I Specific) ?
+AC_MSG_CHECKING([if gcc accepts -march=octeon])
+
+safe_CFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -march=octeon"
+
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[
+  return 0;
+]])], [
+FLAG_OCTEON="-march=octeon"
+AC_MSG_RESULT([yes])
+], [
+FLAG_OCTEON=""
+AC_MSG_RESULT([no])
+])
+CFLAGS=$safe_CFLAGS
+
+AC_SUBST(FLAG_OCTEON)
+
+
+# does this compiler support -march=octeon2 (Cavium OCTEON II Specific) ?
+AC_MSG_CHECKING([if gcc accepts -march=octeon2])
+
+safe_CFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -march=octeon2"
+
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[
+  return 0;
+]])], [
+FLAG_OCTEON2="-march=octeon2"
+AC_MSG_RESULT([yes])
+], [
+FLAG_OCTEON2=""
+AC_MSG_RESULT([no])
+])
+CFLAGS=$safe_CFLAGS
+
+AC_SUBST(FLAG_OCTEON2)
+
+
 # does this compiler support -mmmx ?
 AC_MSG_CHECKING([if gcc accepts -mmmx])
 
@@ -1834,7 +1961,7 @@ CFLAGS=$safe_CFLAGS
 # (Pedantically if the linker is gold then -Ttext is fine, but newer
 # gold versions also support -Ttext-segment. So just assume that unless
 # we can use -Ttext-segment we need to strip the build-id NOTEs.
-if test "x${linker_using_t_text}" == "xyes"; then
+if test "x${linker_using_t_text}" = "xyes"; then
 AC_MSG_NOTICE([ld -Ttext used, need to strip build-id NOTEs.])
 # does the linker support -Wl,--build-id=none ?  Note, it's
 # important that we test indirectly via whichever C compiler
@@ -2406,6 +2533,7 @@ if test x$VGCONF_PLATFORM_PRI_CAPS = xX86_LINUX \
   mflag_primary=$FLAG_M32
 elif test x$VGCONF_PLATFORM_PRI_CAPS = xAMD64_LINUX \
        -o x$VGCONF_PLATFORM_PRI_CAPS = xPPC64_LINUX \
+       -o x$VGCONF_PLATFORM_PRI_CAPS = xARM64_LINUX \
        -o x$VGCONF_PLATFORM_PRI_CAPS = xS390X_LINUX ; then
   mflag_primary=$FLAG_M64
 elif test x$VGCONF_PLATFORM_PRI_CAPS = xX86_DARWIN ; then

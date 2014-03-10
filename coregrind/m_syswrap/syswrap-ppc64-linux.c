@@ -1033,14 +1033,14 @@ static SyscallTableEntry syscall_table[] = {
    LINX_(__NR_utimensat,         sys_utimensat),         // 304
    LINXY(__NR_signalfd,          sys_signalfd),          // 305
    LINXY(__NR_timerfd_create,    sys_timerfd_create),    // 306
-   LINX_(__NR_eventfd,           sys_eventfd),           // 307
+   LINXY(__NR_eventfd,           sys_eventfd),           // 307
    LINX_(__NR_sync_file_range2,  sys_sync_file_range2),  // 308
    LINX_(__NR_fallocate,         sys_fallocate),         // 309
 //   LINXY(__NR_subpage_prot,       sys_ni_syscall),       // 310
    LINXY(__NR_timerfd_settime,   sys_timerfd_settime),  // 311
    LINXY(__NR_timerfd_gettime,   sys_timerfd_gettime),  // 312
    LINXY(__NR_signalfd4,         sys_signalfd4),        // 313
-   LINX_(__NR_eventfd2,          sys_eventfd2),         // 314
+   LINXY(__NR_eventfd2,          sys_eventfd2),         // 314
    LINXY(__NR_epoll_create1,     sys_epoll_create1),    // 315
    LINXY(__NR_dup3,              sys_dup3),             // 316
    LINXY(__NR_pipe2,             sys_pipe2),            // 317
@@ -1049,6 +1049,8 @@ static SyscallTableEntry syscall_table[] = {
    LINXY(__NR_preadv,            sys_preadv),           // 320
    LINX_(__NR_pwritev,           sys_pwritev),          // 321
    LINXY(__NR_rt_tgsigqueueinfo, sys_rt_tgsigqueueinfo),// 322
+
+   LINXY(__NR_clock_adjtime,     sys_clock_adjtime),    // 347
 
    LINXY(__NR_process_vm_readv,  sys_process_vm_readv), // 351
    LINX_(__NR_process_vm_writev, sys_process_vm_writev) // 352

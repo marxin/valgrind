@@ -640,7 +640,9 @@ Addr setup_client_stack( void*  init_sp,
          case AT_GID:
          case AT_EGID:
          case AT_CLKTCK:
-#        if !defined(VGPV_arm_linux_android) && !defined(VGPV_x86_linux_android)
+#        if !defined(VGPV_arm_linux_android) \
+            && !defined(VGPV_x86_linux_android) \
+            && !defined(VGPV_mips32_linux_android)
          case AT_FPUCW: /* missing on android */
 #        endif
             /* All these are pointerless, so we don't need to do
@@ -662,18 +664,7 @@ Addr setup_client_stack( void*  init_sp,
             break;
 
          case AT_BASE:
-            /* When gdbserver sends the auxv to gdb, the AT_BASE has
-               to be ignored, as otherwise gdb adds this offset
-               to loaded shared libs, causing wrong address
-               relocation e.g. when inserting breaks.
-               However, ignoring AT_BASE makes V crash on Android 4.1.
-               So, keep the AT_BASE on android for now.
-               ??? Need to dig in depth about AT_BASE/GDB interaction */
-#           if !defined(VGPV_arm_linux_android) \
-               && !defined(VGPV_x86_linux_android)
-            auxv->a_type = AT_IGNORE;
-#           endif
-            auxv->u.a_val = info->interp_base;
+            auxv->u.a_val = info->interp_offset;
             break;
 
          case AT_PLATFORM:
@@ -1049,7 +1040,7 @@ void VG_(ii_finalise_image)( IIFinaliseImageInfo iifii )
    arch->vex.guest_GPR2 = iifii.initial_client_TOC;
    arch->vex.guest_CIA  = iifii.initial_client_IP;
 
-#   elif defined(VGP_arm_linux)
+#  elif defined(VGP_arm_linux)
    /* Zero out the initial state, and set up the simulated FPU in a
       sane way. */
    LibVEX_GuestARM_initialise(&arch->vex);
@@ -1065,6 +1056,17 @@ void VG_(ii_finalise_image)( IIFinaliseImageInfo iifii )
    // FIXME jrs: what's this for?
    arch->vex.guest_R1 =  iifii.initial_client_SP;
 
+#  elif defined(VGP_arm64_linux)
+   /* Zero out the initial state. */
+   LibVEX_GuestARM64_initialise(&arch->vex);
+
+   /* Zero out the shadow areas. */
+   VG_(memset)(&arch->vex_shadow1, 0, sizeof(VexGuestARM64State));
+   VG_(memset)(&arch->vex_shadow2, 0, sizeof(VexGuestARM64State));
+
+   arch->vex.guest_XSP = iifii.initial_client_SP;
+   arch->vex.guest_PC  = iifii.initial_client_IP;
+
 #  elif defined(VGP_s390x_linux)
    vg_assert(0 == sizeof(VexGuestS390XState) % 16);
 
@@ -1076,9 +1078,9 @@ void VG_(ii_finalise_image)( IIFinaliseImageInfo iifii )
    VG_(memset)(&arch->vex_shadow1, 0xFF, sizeof(VexGuestS390XState));
    VG_(memset)(&arch->vex_shadow2, 0x00, sizeof(VexGuestS390XState));
    /* ... except SP, FPC, and IA */
-   VG_(memset)(&arch->vex_shadow1 + VG_O_STACK_PTR, 0x00, 8);
-   VG_(memset)(&arch->vex_shadow1 + VG_O_FPC_REG,   0x00, 4);
-   VG_(memset)(&arch->vex_shadow1 + VG_O_INSTR_PTR, 0x00, 8);
+   arch->vex_shadow1.guest_SP = 0;
+   arch->vex_shadow1.guest_fpc = 0;
+   arch->vex_shadow1.guest_IA = 0;
 
    /* Put essential stuff into the new state. */
    arch->vex.guest_SP = iifii.initial_client_SP;

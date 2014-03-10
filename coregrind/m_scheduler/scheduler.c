@@ -200,6 +200,7 @@ const HChar* name_of_sched_event ( UInt event )
    switch (event) {
       case VEX_TRC_JMP_TINVAL:         return "TINVAL";
       case VEX_TRC_JMP_NOREDIR:        return "NOREDIR";
+      case VEX_TRC_JMP_SIGILL:         return "SIGILL";
       case VEX_TRC_JMP_SIGTRAP:        return "SIGTRAP";
       case VEX_TRC_JMP_SIGSEGV:        return "SIGSEGV";
       case VEX_TRC_JMP_SIGBUS:         return "SIGBUS";
@@ -790,12 +791,21 @@ static void do_pre_run_checks ( ThreadState* tst )
    vg_assert(VG_IS_8_ALIGNED(& tst->arch.vex_shadow2.guest_D1));
 #  endif
 
+#  if defined(VGA_arm64)
+   vg_assert(VG_IS_8_ALIGNED(& tst->arch.vex.guest_X0));
+   vg_assert(VG_IS_8_ALIGNED(& tst->arch.vex_shadow1.guest_X0));
+   vg_assert(VG_IS_8_ALIGNED(& tst->arch.vex_shadow2.guest_X0));
+   vg_assert(VG_IS_16_ALIGNED(& tst->arch.vex.guest_Q0));
+   vg_assert(VG_IS_16_ALIGNED(& tst->arch.vex_shadow1.guest_Q0));
+   vg_assert(VG_IS_16_ALIGNED(& tst->arch.vex_shadow2.guest_Q0));
+#  endif
+
 #  if defined(VGA_s390x)
    /* no special requirements */
 #  endif
 
 #  if defined(VGA_mips32) || defined(VGA_mips64)
-  /* no special requirements */
+   /* no special requirements */
 #  endif
 }
 
@@ -1425,6 +1435,10 @@ VgSchedReturnCode VG_(scheduler) ( ThreadId tid )
          break;
       }
 
+      case VEX_TRC_JMP_SIGILL:
+         VG_(synth_sigill)(tid, VG_(get_IP)(tid));
+         break;
+
       case VEX_TRC_JMP_SIGTRAP:
          VG_(synth_sigtrap)(tid);
          break;
@@ -1598,6 +1612,9 @@ void VG_(nuke_all_threads_except) ( ThreadId me, VgSchedReturnCode src )
 #elif defined(VGA_arm)
 #  define VG_CLREQ_ARGS       guest_R4
 #  define VG_CLREQ_RET        guest_R3
+#elif defined(VGA_arm64)
+#  define VG_CLREQ_ARGS       guest_X4
+#  define VG_CLREQ_RET        guest_X3
 #elif defined (VGA_s390x)
 #  define VG_CLREQ_ARGS       guest_r2
 #  define VG_CLREQ_RET        guest_r3

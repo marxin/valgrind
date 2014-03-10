@@ -89,6 +89,8 @@
 #  include "vki-posixtypes-ppc64-linux.h"
 #elif defined(VGA_arm)
 #  include "vki-posixtypes-arm-linux.h"
+#elif defined(VGA_arm64)
+#  include "vki-posixtypes-arm64-linux.h"
 #elif defined(VGA_s390x)
 #  include "vki-posixtypes-s390x-linux.h"
 #elif defined(VGA_mips32)
@@ -213,6 +215,8 @@ typedef unsigned int	        vki_uint;
 #  include "vki-ppc64-linux.h"
 #elif defined(VGA_arm)
 #  include "vki-arm-linux.h"
+#elif defined(VGA_arm64)
+#  include "vki-arm64-linux.h"
 #elif defined(VGA_s390x)
 #  include "vki-s390x-linux.h"
 #elif defined(VGA_mips32)
@@ -540,6 +544,9 @@ typedef struct vki_siginfo {
 #define VKI_SIGEV_PAD_SIZE	((VKI_SIGEV_MAX_SIZE - VKI___ARCH_SIGEV_PREAMBLE_SIZE) \
 		/ sizeof(int))
 
+/* This is the flag the kernel handles, userspace/glibc handles SEGEV_THEAD. */
+#define VKI_SIGEV_THREAD_ID	4
+
 typedef struct vki_sigevent {
 	vki_sigval_t sigev_value;
 	int sigev_signo;
@@ -554,6 +561,8 @@ typedef struct vki_sigevent {
 		} _sigev_thread;
 	} _sigev_un;
 } vki_sigevent_t;
+
+#define vki_sigev_notify_thread_id	_sigev_un._tid
 
 //----------------------------------------------------------------------
 // From elsewhere...
@@ -1234,9 +1243,6 @@ struct  vki_seminfo {
 //----------------------------------------------------------------------
 
 #define VKI_EWOULDBLOCK		VKI_EAGAIN
-
-#define	VKI_ENOSYS		38	/* Function not implemented */
-#define	VKI_EOVERFLOW		75	/* Value too large for defined data type */
 
 //----------------------------------------------------------------------
 // From linux-2.6.8.1/include/linux/wait.h
@@ -2865,7 +2871,8 @@ struct vki_getcpu_cache {
 // From kernel/common/include/linux/ashmem.h
 //----------------------------------------------------------------------
 
-#if defined(VGPV_arm_linux_android) || defined(VGPV_x86_linux_android)
+#if defined(VGPV_arm_linux_android) || defined(VGPV_x86_linux_android) \
+    || defined(VGPV_mips32_linux_android)
 
 #define VKI_ASHMEM_NAME_LEN 256
 
