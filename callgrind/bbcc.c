@@ -883,6 +883,8 @@ void CLG_(setup_bbcc)(BB* bb)
 	// FIXME: Why can this fail?
 	// CLG_ASSERT(jcc->jmpkind == jmpkind);
     }
+
+    CLG_DEBUG(3,"jump_done\n");
     
     jcc->call_counter++;
     if (isConditionalJump)

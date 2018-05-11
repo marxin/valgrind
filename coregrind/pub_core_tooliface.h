@@ -99,7 +99,7 @@ typedef
    VgNeeds;
 
 extern VgNeeds VG_(needs);
-
+struct NSegment;
 /* ---------------------------------------------------------------------
    The dictionary of callable tool functions
    ------------------------------------------------------------------ */
@@ -246,7 +246,8 @@ typedef struct {
 
    void (*track_pre_deliver_signal) (ThreadId, Int sigNo, Bool);
    void (*track_post_deliver_signal)(ThreadId, Int sigNo);
-
+   void (*track_mmap)(struct NSegment const * seg);
+   void (*track_munmap)(Addr a, SizeT len);
 } VgToolInterface;
 
 extern VgToolInterface VG_(tdict);

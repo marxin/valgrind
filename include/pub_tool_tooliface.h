@@ -497,7 +497,6 @@ extern void VG_(needs_xml_output) ( void );
    function here. */
 extern void VG_(needs_final_IR_tidy_pass) ( IRSB*(*final_tidy)(IRSB*) );
 
-
 /* ------------------------------------------------------------------ */
 /* Core events to track */
 
@@ -717,6 +716,17 @@ void VG_(track_pre_deliver_signal) (void(*f)(ThreadId tid, Int sigNo,
 /* Called after a signal is delivered.  Nb: unfortunately, if the signal
    handler longjmps, this won't be called.  */
 void VG_(track_post_deliver_signal)(void(*f)(ThreadId tid, Int sigNo));
+
+struct NSegment;
+void VG_(track_mmap)(void(*f)(struct NSegment const * seg));
+void VG_(track_munmap)(void(*f)(Addr a, SizeT len));
+
+extern void VG_(needs_mmap_notify)(
+  void (*track_mmap)(struct NSegment const * seg),
+  void (*track_munmap)(Addr a, SizeT len)
+);
+
+extern void VG_(needs_final_IR_tidy_pass) ( IRSB*(*final_tidy)(IRSB*) );
 
 #endif   // __PUB_TOOL_TOOLIFACE_H
 

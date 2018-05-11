@@ -371,6 +371,14 @@ void VG_(needs_final_IR_tidy_pass)(
    VG_(tdict).tool_final_IR_tidy_pass = final_tidy;
 }
 
+void VG_(needs_mmap_notify)(
+void (*track_mmap)(struct NSegment const * seg),
+void (*track_munmap)(Addr a, SizeT len)
+) 
+{
+   VG_(tdict).track_mmap = track_mmap;
+   VG_(tdict).track_munmap = track_munmap;
+}
 /*--------------------------------------------------------------------*/
 /* Tracked events.  Digit 'n' on DEFn is the REGPARMness. */
 
@@ -457,6 +465,9 @@ DEF0(track_pre_thread_ll_exit,    ThreadId)
 
 DEF0(track_pre_deliver_signal,    ThreadId, Int sigNo, Bool)
 DEF0(track_post_deliver_signal,   ThreadId, Int sigNo)
+
+DEF0(track_mmap,		  struct NSegment const *)
+DEF0(track_munmap,		  Addr, SizeT)
 
 /*--------------------------------------------------------------------*/
 /*--- end                                                          ---*/

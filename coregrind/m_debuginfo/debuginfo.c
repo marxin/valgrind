@@ -56,6 +56,7 @@
 #include "priv_tytypes.h"
 #include "priv_storage.h"
 #include "priv_readdwarf.h"
+#include "pub_core_tooliface.h"
 #if defined(VGO_linux) || defined(VGO_solaris)
 # include "priv_readelf.h"
 # include "priv_readdwarf3.h"
@@ -842,6 +843,8 @@ ULong VG_(di_notify_mmap)( Addr a, Bool allow_SkFileV, Int use_fd )
 
    /* guaranteed by aspacemgr-linux.c, sane_NSegment() */
    vg_assert(seg->end > seg->start);
+   if (VG_(tdict.track_mmap))
+     VG_(tdict).track_mmap(seg);
 
    /* Ignore non-file mappings */
    if ( ! (seg->kind == SkFileC
@@ -1079,6 +1082,8 @@ void VG_(di_notify_munmap)( Addr a, SizeT len )
    anyFound = discard_syms_in_range(a, len);
    if (anyFound)
       caches__invalidate();
+   if (VG_(tdict.track_munmap))
+     VG_(tdict).track_munmap(a, len);
 }
 
 
