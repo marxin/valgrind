@@ -99,107 +99,49 @@ struct {
 static Event events[N_EVENTS];
 static Int   events_used = 0;
 
-typedef struct {
-  const char *filename;
-  OSet *symbols;
-  int fd; // descriptor for log output
-} symbol_table;
+typedef struct
+{
+  Addr addr;
+  SizeT size;
+} addr_tuple;
 
-typedef struct {
-  Word addr; // mapped address
-  Word end; // addr + length
-  Word offset; // offset within file
-  symbol_table *symbol_table; // symbols mapped in by this library
-  OSet *sub_mmaps;
-}  mmap_area;
-
-struct Symbol{
-  Word offset;
-  Word end; // offset + length
-  SizeT namelen;
-  char *name; // these are actually section names
-}  __attribute__((__packed__));
-
-typedef struct Symbol Symbol;
-
-// this works on both mmap_area & Symbol structs
-static Word mmap_lookup (const void *a, const void *b) {
-  const mmap_area *key = (const mmap_area *) a;
-  const mmap_area *elem = (const mmap_area *) b;
-  if (key->addr >= elem->addr && key->addr < elem->end)
-    return 0;
-  return key->addr - elem->addr;
+static Word addr_compare (const void *a, const void *b) {
+  const addr_tuple *a1 = (const addr_tuple *)a;
+  const addr_tuple *b1 = (const addr_tuple *)b;
+  return a1->addr - b1->addr;
 }
 
-static Word symbol_compare (const void *a, const void *b) {
-  const symbol_table *key = (const symbol_table *)a;
-  const symbol_table *elem = (const symbol_table *)b;
-  return VG_(strcmp)(key->filename, elem->filename);
-}
+static OSet *seen_addresses = NULL;
 
-static OSet *mmaps = NULL;
-static OSet *symbols = NULL;
-
-static void log_new_symbol(symbol_table *table, Symbol *symbol) {
-  if (!table->fd) {
-    const int len = VG_(strlen)(table->filename)+5;
-    char *buf = VG_(malloc)("symbol_table", len);
-    VG_(snprintf)(buf, len, "%s.log", table->filename);
-    VG_(printf)("outputting to %s\n",buf);
-    SysRes r = VG_(open)(buf, VKI_O_WRONLY | VKI_O_CREAT | VKI_O_TRUNC, 0644);
-    tl_assert(!sr_isError(r));
-    table->fd = sr_Res(r);
-  }
-  VG_(write)(table->fd, symbol->name, symbol->namelen);
-  VG_(write)(table->fd, "\n", 1);
-  
-  //ExeContext* now = VG_(record_ExeContext)( VG_(get_running_tid)(), 0);
-  //VG_(printf)("Faulting in %s\n", symbol->name);
-  //VG_(get_and_pp_StackTrace)(VG_(get_running_tid)(), 10);
-  //VG_(pp_ExeContext)(now);
-  //VG_(exit)(127); 
-}
-
-
-/* addr: address to look up
-   target_mmaps: set of mmaps to look in
-   failret: return value to return if the address is not found
-*/
-static mmap_area* find_mmap(Addr addr, OSet *target_mmaps, mmap_area *failret) {
-  mmap_area key;
-  key.addr = addr;
-  mmap_area *ret = VG_(OSetGen_LookupWithCmp)(target_mmaps, &key, mmap_lookup);
-  if (!ret)
-    return failret;
-
-  OSet *sub_mmaps = ret->sub_mmaps;
-  if (!sub_mmaps)
-    return ret;
-  
-  return find_mmap(addr, sub_mmaps, ret);
+static void
+report (addr_tuple *t)
+{
+  VG_(printf)("ma:%p:%ld\n", t->addr, t->size);
 }
 
 // not sure if I should make use of size
 static VG_REGPARM(2) void inspect_addr(Addr addr, SizeT size)
 {
-  Symbol skey;
+  addr_tuple key;
+  key.addr = addr;
 
-//  VG_(printf)("access: %p: %ld\n", addr, size);
-
-  // this doesn't work for nested mmaps yet
-  mmap_area *match = find_mmap(addr, mmaps, NULL);
-  if (!match || !match->symbol_table) return;
-  OSet *mysymbols = match->symbol_table->symbols;
-
-  skey.offset = addr - match->addr + match->offset; 
-  Symbol *smatch = VG_(OSetGen_LookupWithCmp)(mysymbols, &skey, mmap_lookup);
-  if (!smatch) {
-    //  VG_(printf)("???@%p\n", skey.offset);
+  addr_tuple *r = VG_(OSetGen_LookupWithCmp)(seen_addresses, &key, addr_compare);
+  if (r)
+  {
+    if (r->size < size)
+    {
+      r->size = size;
+      report (r);
+    }
     return;
   }
-  log_new_symbol(match->symbol_table, smatch);
-  VG_(OSetGen_Remove)(mysymbols, smatch);
-  VG_(OSetGen_FreeNode)(symbols, smatch);
+
+  r = VG_(OSetGen_AllocNode)(seen_addresses, sizeof(addr_tuple));
+  r->addr = addr;
+  r->size = size;
+  VG_(OSetGen_Insert)(seen_addresses, r);
+
+  report (r);
 }
 
 static void flushEvents(IRSB* sb)
@@ -247,7 +189,8 @@ void addEvent ( IRSB* sb, IRAtom* daddr, Int dsize )
 
 static void lk_post_clo_init(void)
 {
-
+  seen_addresses = VG_(OSetGen_Create)(0, addr_compare, VG_(malloc), "seen addresses",
+                                VG_(free) );
 }
 
 static
@@ -301,6 +244,18 @@ IRSB* lk_instrument ( VgCallbackClosure* closure,
 
       addStmtToIRSB( sbOut, st );
       break;
+
+    case Ist_LoadG:
+      {
+	IRLoadG* lg       = st->Ist.LoadG.details;
+	IRType   type     = Ity_INVALID; /* loaded type */
+	IRType   typeWide = Ity_INVALID; /* after implicit widening */
+	typeOfIRLoadGOp(lg->cvt, &typeWide, &type);
+	tl_assert(type != Ity_INVALID);
+	addEvent( sbOut, lg->addr, sizeofIRType(type));
+	addStmtToIRSB( sbOut, st );
+	break;
+      }
 
     case Ist_WrTmp: 
       {
@@ -391,11 +346,6 @@ IRSB* lk_instrument ( VgCallbackClosure* closure,
 
       break;
 
-    case Ist_LoadG:
-      // TODO
-      addStmtToIRSB( sbOut, st );      // Original statement
-      break;
-
     default:
       tl_assert(0);
     }
@@ -412,162 +362,12 @@ static void lk_fini(Int exitcode)
   VG_(umsg)("I am done.\n");
 }
 
-static OSet* parse_symbols(char *buf, char *endbuf) {
-  OSet *mysymbols = VG_(OSetGen_Create)(0, NULL, VG_(malloc), "symbols",
-                                        VG_(free) );
-  char *p = buf;
-  int i = 0;
-  long total = (long)endbuf - (long)buf;
-  while(p && p < endbuf) {
-    Word offset = VG_(strtoll16)(p, &p);
-    tl_assert(offset && p && *p == '\t');
-    //skip \t
-    p++;
-    Word length = VG_(strtoll16)(p, &p);
-    tl_assert(length && p && *p == '\t');
-    char *name = ++p;
-    p = VG_(strchr)(name, ' ');
-    if (!p)
-      p = VG_(strchr)(name, '\n');
-    tl_assert(p);
-    int len = p - name;
-    Symbol *s = VG_(OSetGen_AllocNode)(mysymbols, sizeof(Symbol));
-    s->offset = offset;
-    s->end = offset + length;
-    s->namelen = len;
-    s->name = name;
-    if ((i++ & 0xFFF)==0xFFF) {
-      long pos = (long)p - (long)buf;
-      VG_(printf)("%ld%%\n", pos*100/total);
-    }
-    VG_(OSetGen_Insert)(mysymbols, s);
-    // move to next line
-    p = VG_(strchr)(p, '\n');
-    tl_assert(p);
-    p++;
-  }
-  return mysymbols;
-}
-
 // borrowed from pub_core_aspacemgr.h
 extern SysRes VG_(am_mmap_file_float_valgrind)
    ( SizeT length, UInt prot, Int fd, Off64T offset );
 
-static symbol_table* find_symbol_table(const char *symbol_file) {
-  symbol_table t;
-  t.filename = symbol_file;
-  symbol_table *table = VG_(OSetGen_Lookup)(symbols, &t);
-  
-  if (table) {
-    if (table->symbols)
-      return table;
-    else 
-      return NULL;
-  }
-
-  table = VG_(OSetGen_AllocNode)(symbols, sizeof(symbol_table));
-  table->filename = VG_(strdup)("symbol_table", symbol_file);
-  table->symbols = NULL;
-  table->fd = 0;
-  VG_(OSetGen_Insert)(symbols, table);
-
-  static const char suffix[] = "%s.sections";
-  char *filename= VG_(malloc)("symbolname", VG_(strlen)(symbol_file) + sizeof(suffix));
-  VG_(sprintf)(filename, suffix, symbol_file);
-  SysRes r = VG_(open)(filename, VKI_O_RDONLY, 0);
-  VG_(free)(filename);
-  if (sr_isError(r)) {
-    return NULL;
-  }
-  int fd = sr_Res(r);
-  int length = VG_(lseek) (fd, 0, VKI_SEEK_END);
-  VG_(lseek) (fd, 0, VKI_SEEK_SET);
-  char *buf;
-  // leave the mmap hanging around as we will be referencing it
-  r = VG_(am_mmap_file_float_valgrind) ( length, VKI_PROT_READ, fd, 0 );
-  VG_(close)(fd);
-  if (!sr_isError(r)) {
-    buf = sr_Res(r);
-    VG_(printf)("parsing symbols for %s\n", symbol_file);
-    table->symbols = parse_symbols(buf, buf + length);
-    VG_(printf)("Parsed %s\n", symbol_file);
-  } else {
-    VG_(printf)("Failed to mmap %s\n", symbol_file);
-  }
-  return table;
-}
-
-static void track_mmap(NSegment const * seg) {
-  /* Ignore non-file mappings */
-  if (  (seg->kind != SkFileC))
-    return;
-
-  char *filename = VG_(am_get_filename)(seg);
-
-  symbol_table *table = find_symbol_table(filename);
-  if (!table)
-    return;
-
-  mmap_area *a = VG_(OSetGen_AllocNode)(mmaps, sizeof(mmap_area));
-  a->addr = seg->start;
-  a->offset = seg->offset;
-  a->end = seg->end;
-  a->symbol_table = table;
-  a->sub_mmaps = NULL;
-
-  VG_(OSetGen_ResetIter)(mmaps);
-  mmap_area *iterator_mmap = NULL;
-  while((iterator_mmap = VG_(OSetGen_Next)(mmaps)) != NULL) {
-    if (iterator_mmap->addr < a->addr && iterator_mmap->end > a->end) {
-      if (0)
-        VG_(printf)("nested ");
-      if (!iterator_mmap->sub_mmaps) {
-        iterator_mmap->sub_mmaps = VG_(OSetGen_Create)(0, NULL, VG_(malloc), "sub_mmaps", VG_(free));
-      }
-      break;
-    }
-  }
-
-  // hack, sometimes we see 2 things mapped in same address, which is should be impossible
-  /* mmap_area *match = VG_(OSetGen_Remove)(mmaps, a);
-     if (match) {
-     VG_(printf)("mmap: Skipping error: %s and %s(discarding) both claim to be mapped at %p!\n",
-     myfile->file, match->symbol_table ? match->symbol_table->filename : "(unknown)", a->addr);
-     VG_(OSetGen_FreeNode)(mmaps, match);
-     }*/
-  if (0)
-    VG_(printf)("mmap %s addr:%p len:%p  offset:%p \n", 
-                filename,(void *)a->addr, (void *)(a->end - a->addr), (void *)a->offset);
-
-  VG_(OSetGen_Insert)(mmaps, a);
-
-}
-
-static void track_munmap(Addr addr, SizeT length) {
-  mmap_area fake;
-  fake.addr = addr;
-  mmap_area *match = VG_(OSetGen_Remove)(mmaps, &fake);
-  if (!match) {
-    //      VG_(printf)("munmap: Failed to find a mmmap()==%p\n", fake.addr);
-    return;
-  } else if (match->end - match->addr != length) {
-    VG_(printf)("munmap: Unhandled %p is unmapped with %p, but mapped with %p\n", 
-                (void *)fake.addr, (void *)length, (void *)(match->end - match->addr));
-  }
-  if (0)
-    VG_(printf)("munmap %s addr:%p length:%p\n", match->symbol_table->filename,
-                (void *)match->addr, (void *)(match->end - match->addr));
-  VG_(get_and_pp_StackTrace)(VG_(get_running_tid)(), 10);
-  VG_(OSetGen_FreeNode)(mmaps, match);
-}
-
 static void lk_pre_clo_init(void)
 {
-  mmaps = VG_(OSetGen_Create)(0, NULL, VG_(malloc), "mmaps",
-                              VG_(free) );
-  symbols = VG_(OSetGen_Create)(0, symbol_compare, VG_(malloc), "symbols",
-                                VG_(free) );
-  
   VG_(details_name)            ("Icegrind");
   VG_(details_version)         (NULL);
   VG_(details_description)     ("A tool to produce a chronological log of function/data access to aid with optimizing cold startup and memory usage");
@@ -579,7 +379,6 @@ static void lk_pre_clo_init(void)
   VG_(basic_tool_funcs)          (lk_post_clo_init,
                                   lk_instrument,
                                   lk_fini);
-  VG_(needs_mmap_notify)(track_mmap, track_munmap);
 }
 
 VG_DETERMINE_INTERFACE_VERSION(lk_pre_clo_init)
